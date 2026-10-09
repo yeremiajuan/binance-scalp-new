@@ -1,0 +1,47 @@
+process A: paperbot replay (runs ~30 s, holds the lock for its lifetime)
+process A pid 2261 running: yes
+$ paperbot resume --config config/paper.toml --input fixtures/synthetic_demo.jsonl --state /tmp/tmp.mYMShwaC8p/lock/state.sqlite
+PAPER | LOCKED: state /tmp/tmp.mYMShwaC8p/lock/state.sqlite is locked by another process; refusing to mutate it
+[exit 3]
+$ paperbot resume --config config/paper.toml --input fixtures/synthetic_demo.jsonl --state /tmp/tmp.mYMShwaC8p/lock-alias/state.sqlite
+PAPER | LOCKED: state /tmp/tmp.mYMShwaC8p/lock/state.sqlite is locked by another process; refusing to mutate it
+[exit 3]
+$ paperbot kill --state /tmp/tmp.mYMShwaC8p/lock-alias/../lock/state.sqlite --reason second process
+PAPER | LOCKED: state /tmp/tmp.mYMShwaC8p/lock/state.sqlite is locked by another process; refusing to mutate it
+[exit 3]
+$ paperbot replay --config config/paper.toml --input fixtures/synthetic_demo.jsonl --state /tmp/tmp.mYMShwaC8p/lock/state.sqlite
+PAPER | LOCKED: state /tmp/tmp.mYMShwaC8p/lock/state.sqlite is locked by another process; refusing to mutate it
+[exit 3]
+read-only status while A owns the state:
+$ paperbot status --state /tmp/tmp.mYMShwaC8p/lock/state.sqlite
+PAPER | SYNTHETIC | BTCUSDT | B20-T5-v1 | account paper-synthetic-demo
+cursor 1053/13230 · clock 2026-10-01T12:32:52.100Z · reconciliation OK
+config 3f9aba57ef97c6da · input 8b92caa29bbf6c93 · metadata SYNTHETIC d1f5ef2bbeb9007e (retrieved 2026-10-09T04:46:08.396Z)
+cash 1000 free + 0 locked USDT · BTC 0 (sellable 0, dust 0)
+mark bid 60118.2 age 0us fresh · conservative equity 1000 · exposure 0
+realized net 0 · unrealized net (conservative) 0 · fees 0 USDT value
+latches none
+[exit 0]
+process A exit 0
+PAPER | SYNTHETIC | replay: processed 13230 events, cursor 13230/13230 | input sha256 8b92caa29bbf6c93dbd8dd2e282dc52e0026e7e892d2753d9e723af937911c1b | dispositions {'accepted': 13215, 'rejected': 14, 'duplicate': 1}
+A's final state vs the uninterrupted reference (proves the losers changed nothing):
+$ python scripts/compare_states.py /home/user/binance-scalp-new/evidence/demo_state.sqlite /tmp/tmp.mYMShwaC8p/lock/state.sqlite
+table              rows A   rows B  match  sha256(A)[:16]
+balances                2        2  yes    1d2185472a8b2f8c
+candidates             17       17  yes    9602e531c8979c24
+control_events          0        0  yes    4f53cda18c2baa0c
+cursor                  1        1  yes    b60416b91d4ff50e
+engine_state            1        1  yes    5de28e7efc33a3ef
+exit_intents            5        5  yes    b3c8813edc6ea33d
+fills                  12       12  yes    3b35adc0544932cd
+health_events          19       19  yes    4b2cfa4f0cb36f92
+input_log           13230    13230  yes    b2ae50afd9d2b79b
+ledger                 47       47  yes    46c10d102ef24a0d
+meta                   17       17  yes    6b22ab7806829807
+orders                 13       13  yes    88541bdd53cfda45
+positions               6        6  yes    6708d16ca2dacd3d
+risk_events             5        5  yes    2e1dfaf108c65d63
+source_events       13229    13229  yes    a8ab11f4a5496c9f
+sqlite_sequence         3        3  yes    2a503e267fc1e3c3
+IDENTICAL
+[exit 0]

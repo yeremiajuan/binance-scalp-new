@@ -1,0 +1,56 @@
+$ paperbot replay --config config/paper.toml --input fixtures/synthetic_demo.jsonl --state /tmp/tmp.mYMShwaC8p/kill.sqlite --stop-after 11250 --quiet
+PAPER | SYNTHETIC | replay: processed 11250 events, cursor 11250/13230 | input sha256 8b92caa29bbf6c93dbd8dd2e282dc52e0026e7e892d2753d9e723af937911c1b | dispositions {'accepted': 11237, 'rejected': 12, 'duplicate': 1}
+[exit 0]
+$ paperbot status --state /tmp/tmp.mYMShwaC8p/kill.sqlite
+PAPER | SYNTHETIC | BTCUSDT | B20-T5-v1 | account paper-synthetic-demo
+cursor 11250/13230 · clock 2026-10-01T17:51:06.100Z · reconciliation OK
+config 3f9aba57ef97c6da · input 8b92caa29bbf6c93 · metadata SYNTHETIC d1f5ef2bbeb9007e (retrieved 2026-10-09T04:46:08.396Z)
+cash 819.878552571 free + 0 locked USDT · BTC 0.00287221 (sellable 0.00287, dust 0.00000221)
+mark bid 63508.15 age 0us fresh · conservative equity 1001.9464397337 · exposure 182.4087435115
+realized net 2.4716063639~ · unrealized net (conservative) -0.5251666302~ · fees 0.7940445903 USDT value
+latches none
+UNRESOLVED: open position paper-synthetic-demo|BTCUSDT|B20-T5-v1|3f9aba57ef97c6da|2026-10-01T17:50:00.000Z|pos (stop 63303.95, target 64130.19)
+UNRESOLVED: BTC inventory 0.00287221 (dust 0.00000221) remains; no closing fill invented
+[exit 0]
+$ paperbot kill --state /tmp/tmp.mYMShwaC8p/kill.sqlite --reason evidence: manual kill with an open position
+PAPER | SYNTHETIC | manual_kill latched (audited). Pending entries are canceled and tradable inventory exits at the next trustworthy observation when replay resumes.
+[exit 0]
+$ paperbot resume --config config/paper.toml --input fixtures/synthetic_demo.jsonl --state /tmp/tmp.mYMShwaC8p/kill.sqlite --stop-after 60 --quiet
+PAPER | SYNTHETIC | resume: processed 60 events, cursor 11310/13230 | input sha256 8b92caa29bbf6c93dbd8dd2e282dc52e0026e7e892d2753d9e723af937911c1b | dispositions {'accepted': 60}
+[exit 0]
+$ paperbot status --state /tmp/tmp.mYMShwaC8p/kill.sqlite
+PAPER | SYNTHETIC | BTCUSDT | B20-T5-v1 | account paper-synthetic-demo
+cursor 11310/13230 · clock 2026-10-01T17:53:00.150Z · reconciliation OK
+config 3f9aba57ef97c6da · input 8b92caa29bbf6c93 · metadata SYNTHETIC d1f5ef2bbeb9007e (retrieved 2026-10-09T04:46:08.396Z)
+cash 1001.9636425137 free + 0 locked USDT · BTC 0.00000221 (sellable 0, dust 0.00000221)
+mark bid 63499.22 age 50000us fresh · conservative equity 1001.9636425137 · exposure 0.1403332762
+realized net 2.1041373413~ · unrealized net (conservative) -0.1404948276~ · fees 0.9763119476 USDT value
+latches ['manual_kill']
+UNRESOLVED: BTC inventory 0.00000221 (dust 0.00000221) remains; no closing fill invented
+UNRESOLVED: risk latches active: ['manual_kill']
+[exit 0]
+reset without --confirm must fail:
+$ paperbot reset --state /tmp/tmp.mYMShwaC8p/kill.sqlite --latch manual_kill --reason x
+usage: paperbot reset [-h] --state STATE
+                      --latch {manual_kill,daily_loss,drawdown}
+                      --reason REASON --confirm
+paperbot reset: error: the following arguments are required: --confirm
+[exit 2]
+$ paperbot reset --state /tmp/tmp.mYMShwaC8p/kill.sqlite --latch manual_kill --reason evidence: reviewed, resume paper --confirm
+PAPER | SYNTHETIC | manual_kill reset (audited). History is preserved; no implicit resume of other latches.
+[exit 0]
+$ paperbot resume --config config/paper.toml --input fixtures/synthetic_demo.jsonl --state /tmp/tmp.mYMShwaC8p/kill.sqlite --quiet
+PAPER | SYNTHETIC | resume: processed 1920 events, cursor 13230/13230 | input sha256 8b92caa29bbf6c93dbd8dd2e282dc52e0026e7e892d2753d9e723af937911c1b | dispositions {'accepted': 1918, 'rejected': 2}
+[exit 0]
+PAPER | SYNTHETIC | BTCUSDT | B20-T5-v1 | account paper-synthetic-demo
+latches none
+UNRESOLVED: open position paper-synthetic-demo|BTCUSDT|B20-T5-v1|3f9aba57ef97c6da|2026-10-01T18:50:00.000Z|pos (stop 63760.77, target 64599.87)
+UNRESOLVED: BTC inventory 0.0028338 (dust 0.0000038) remains; no closing fill invented
+PAPER | SYNTHETIC: simulated fills on synthetic fixtures. Engineering evidence only; not a backtest, not a forward trial and not evidence of a trading edge. No matching engine, queue position, hidden liquidity or production fill guarantee is modeled. Live trading is not implemented.
+  ['exit', '1'] SELL exit qty=0.00287 limit=63193.6 status=filled filled=0.00287 reason=- exit_reason=halt
+  2026-10-01T17:50:00.000Z entry 63510.51 qty 0.00286713 stop 63303.95 target 64130.19 status closed exit halt residual 0.00000221 opened 2026-10-01T17:51:02.100Z (2026-10-02T00:51:02.100+07:00) closed 2026-10-01T17:51:10.100Z (2026-10-02T00:51:10.100+07:00)
+  latches none · day 2026-10-02 baseline 1000.995526301 (pending False) · HWM 1002.153716271
+  2026-10-01T12:00:00.100Z (2026-10-01T19:00:00.100+07:00) day_rollover {"day": "2026-10-01", "latches_preserved": [], "previous_day": null, "timezone": "Asia/Jakarta"}
+  2026-10-01T17:00:00.100Z (2026-10-02T00:00:00.100+07:00) day_rollover {"day": "2026-10-02", "latches_preserved": [], "previous_day": "2026-10-01", "timezone": "Asia/Jakarta"}
+  CONTROL kill manual_kill at cursor 11250 wall 2026-10-09T06:45:25.929+00:00: evidence: manual kill with an open position
+  CONTROL reset manual_kill at cursor 11310 wall 2026-10-09T06:45:26.898+00:00: evidence: reviewed, resume paper

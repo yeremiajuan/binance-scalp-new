@@ -1,0 +1,29 @@
+
+### environment
+$ uname -srm
+Linux 6.18.44-fc-v80 x86_64
+[exit 0]
+$ python3 --version
+Python 3.13.16
+[exit 0]
+$ git rev-parse HEAD
+01f9ad3afd9e29ff25e503a9ec5c0c844100e18c
+[exit 0]
+$ git status --porcelain
+?? evidence/
+[exit 0]
+clean venv: /tmp/tmp.mYMShwaC8p/venv
+$ python --version
+Python 3.13.16
+[exit 0]
+$ python -m pytest --version
+pytest 9.1.1
+[exit 0]
+$ pip freeze --exclude-editable
+iniconfig==2.3.1
+packaging==26.3
+pluggy==1.6.0
+Pygments==2.21.0
+pytest==9.1.1
+ruff==0.16.10
+[exit 0]

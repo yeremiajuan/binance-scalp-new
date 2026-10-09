@@ -1,0 +1,156 @@
+PAPER | SYNTHETIC | BTCUSDT | B20-T5-v1 | account paper-synthetic-demo
+cursor 13230/13230 · clock 2026-10-01T18:54:00.600Z · reconciliation OK
+config 3f9aba57ef97c6da · input 8b92caa29bbf6c93 · metadata SYNTHETIC d1f5ef2bbeb9007e (retrieved 2026-10-09T04:46:08.396Z)
+cash 818.9591354404 free + 0 locked USDT · BTC 0.0028338 (sellable 0.00283, dust 0.0000038)
+mark bid 63974 age 0us fresh · conservative equity 999.8064151324 · exposure 181.2895212
+realized net 0.4185550519~ · unrealized net (conservative) -0.6121399195~ · fees 1.866377294 USDT value
+latches none
+UNRESOLVED: open position paper-synthetic-demo|BTCUSDT|B20-T5-v1|3f9aba57ef97c6da|2026-10-01T18:50:00.000Z|pos (stop 63760.77, target 64599.87)
+UNRESOLVED: BTC inventory 0.0028338 (dust 0.0000038) remains; no closing fill invented
+
+PAPER | SYNTHETIC: simulated fills on synthetic fixtures. Engineering evidence only; not a backtest, not a forward trial and not evidence of a trading edge. No matching engine, queue position, hidden liquidity or production fill guarantee is modeled. Live trading is not implemented.
+
+== Provenance ==
+  account_id: paper-synthetic-demo
+  schema_version: 1
+  config_sha256: 3f9aba57ef97c6dab422298e5dbb26bdb9f98469e0b79baf8e4ea7c3c4e46d0b
+  metadata_sha256: d1f5ef2bbeb9007e9d5456717d9cc0d12a5baf94fa81abfb9ba817427ac299ef
+  metadata_label: SYNTHETIC
+  metadata_retrieved_at: 2026-10-09T04:46:08.396Z
+  input_path: fixtures/synthetic_demo.jsonl
+  input_sha256: 8b92caa29bbf6c93dbd8dd2e282dc52e0026e7e892d2753d9e723af937911c1b
+  input_events: 13230
+  config: {"account": {"starting_btc": "0", "starting_usdt": "1000"}, "execution": {"buy_limit_cushion_bps": "5", "candle_max_lateness_ms": 5000, "latency_ms": 250, "max_entry_drift_atr": "0.25", "max_spread_bps": "5", "participation_fraction": "0.1", "quote_max_age_ms": 2000, "reference_max_age_ms": 120000, "sell_limit_cushion_bps": "50", "signal_expiry_ms": 5000, "slippage_bps": "1"}, "fees": {"buy_fee_asset": "BTC", "buy_fee_bps": "10", "sell_fee_bps": "10"}, "risk": {"daily_loss_fraction": "0.01", "day_timezone": "Asia/Jakarta", "drawdown_fraction": "0.03", "max_exposure_fraction": "0.2", "risk_per_entry_fraction": "0.001"}, "run": {"account_id": "paper-synthetic-demo", "mode": "paper", "strategy": "B20-T5-v1", "symbol": "BTCUSDT"}}
+  input dispositions: {'accepted': 13215, 'rejected': 14, 'duplicate': 1}
+
+== P&L (USDT) ==
+  starting_usdt: 1000
+  realized_net: 0.4185550519~
+  realized_execution_gross: 2.1034729263~
+  realized_entry_fees_attributed: 0.8418281148~
+  realized_exit_fees: 0.8430897596
+  unrealized_net_conservative: -0.6121399195~
+  unrealized_execution_gross_at_bid: 0.0115610081~
+  fees_usdt_value: 1.866377294
+  fees by native asset: {'BTC': '0.0000162', 'USDT': '0.8430897596'}
+  identity starting+realized+unrealized = cash+liquidation: 999.8064151324~ = 999.8064151324 -> True
+  inventory: total 0.0028338 BTC, basis 181.4594196115~, dust 0.0000038 BTC (basis 0.2433290262~, bid mark 0.2431012, liquidation value 0)
+
+== Candidates (17, submitted 7) ==
+  skip reasons: {'warmup_incomplete': 9, 'spread': 1}
+  2026-10-01T16:10:00.000Z (2026-10-01T23:10:00.000+07:00) submitted  close=61500 H=61405 atr=102.3390906809~ qty=0.00292 limit=61532.04
+  2026-10-01T16:35:00.000Z (2026-10-01T23:35:00.000+07:00) skipped   spread close=62350 H=62255 atr=107.0459132226~ qty=None limit=None
+  2026-10-01T17:00:00.000Z (2026-10-02T00:00:00.000+07:00) submitted  close=62500 H=62405 atr=103.0771831774~ qty=0.00289 limit=62532.75
+  2026-10-01T17:25:00.000Z (2026-10-02T00:25:00.000+07:00) submitted  close=63350 H=63255 atr=108.3378227561~ qty=0.00279 limit=63382.82
+  2026-10-01T17:50:00.000Z (2026-10-02T00:50:00.000+07:00) submitted  close=63500 H=63405 atr=103.2797717846~ qty=0.00287 limit=63532.9
+  2026-10-01T18:15:00.000Z (2026-10-02T01:15:00.000+07:00) submitted  close=63650 H=63555 atr=102.4866020811~ qty=0.00288 limit=63682.72
+  2026-10-01T18:25:00.000Z (2026-10-02T01:25:00.000+07:00) submitted  close=63690 H=63680 atr=113.5443496399~ qty=0.0027 limit=63723.04
+  2026-10-01T18:50:00.000Z (2026-10-02T01:50:00.000+07:00) submitted  close=63960 H=63865 atr=104.88535357~ qty=0.00283 limit=63993.13
+
+== Orders {'filled': 10, 'partial': 2, 'canceled': 1} ==
+  ['2026-10-01T16:10:00.000Z', 'entry'] BUY entry qty=0.00292 limit=61532.04 status=filled filled=0.00292 reason=- exit_reason=-
+      signal 2026-10-01T16:11:00.500Z (2026-10-01T23:11:00.500+07:00) | submitted 2026-10-01T16:11:00.500Z (2026-10-01T23:11:00.500+07:00) | ready 2026-10-01T16:11:00.750Z (2026-10-01T23:11:00.750+07:00) | closed 2026-10-01T16:11:02.100Z (2026-10-01T23:11:02.100+07:00)
+  ['exit', '1'] SELL exit qty=0.00291 limit=61818.65 status=filled filled=0.00291 reason=- exit_reason=target
+      signal - | submitted 2026-10-01T16:14:36.100Z (2026-10-01T23:14:36.100+07:00) | ready 2026-10-01T16:14:36.350Z (2026-10-01T23:14:36.350+07:00) | closed 2026-10-01T16:14:38.100Z (2026-10-01T23:14:38.100+07:00)
+  ['2026-10-01T17:00:00.000Z', 'entry'] BUY entry qty=0.00289 limit=62532.75 status=partial filled=0.002 reason=ioc_remainder_canceled exit_reason=-
+      signal 2026-10-01T17:01:00.500Z (2026-10-02T00:01:00.500+07:00) | submitted 2026-10-01T17:01:00.500Z (2026-10-02T00:01:00.500+07:00) | ready 2026-10-01T17:01:00.750Z (2026-10-02T00:01:00.750+07:00) | closed 2026-10-01T17:01:02.100Z (2026-10-02T00:01:02.100+07:00)
+  ['exit', '1'] SELL exit qty=0.002 limit=62830.6 status=partial filled=0.001 reason=ioc_remainder_canceled exit_reason=target
+      signal - | submitted 2026-10-01T17:02:52.100Z (2026-10-02T00:02:52.100+07:00) | ready 2026-10-01T17:02:52.350Z (2026-10-02T00:02:52.350+07:00) | closed 2026-10-01T17:02:54.100Z (2026-10-02T00:02:54.100+07:00)
+  ['exit', '2'] SELL exit qty=0.001 limit=62843.88 status=filled filled=0.001 reason=- exit_reason=target
+      signal - | submitted 2026-10-01T17:02:54.100Z (2026-10-02T00:02:54.100+07:00) | ready 2026-10-01T17:02:54.350Z (2026-10-02T00:02:54.350+07:00) | closed 2026-10-01T17:02:56.100Z (2026-10-02T00:02:56.100+07:00)
+  ['2026-10-01T17:25:00.000Z', 'entry'] BUY entry qty=0.00279 limit=63382.82 status=canceled filled=0 reason=guard_failed_at_fill:entry_drift exit_reason=-
+      signal 2026-10-01T17:26:00.500Z (2026-10-02T00:26:00.500+07:00) | submitted 2026-10-01T17:26:00.500Z (2026-10-02T00:26:00.500+07:00) | ready 2026-10-01T17:26:00.750Z (2026-10-02T00:26:00.750+07:00) | closed 2026-10-01T17:26:02.100Z (2026-10-02T00:26:02.100+07:00)
+  ['2026-10-01T17:50:00.000Z', 'entry'] BUY entry qty=0.00287 limit=63532.9 status=filled filled=0.00287 reason=- exit_reason=-
+      signal 2026-10-01T17:51:00.500Z (2026-10-02T00:51:00.500+07:00) | submitted 2026-10-01T17:51:00.500Z (2026-10-02T00:51:00.500+07:00) | ready 2026-10-01T17:51:00.750Z (2026-10-02T00:51:00.750+07:00) | closed 2026-10-01T17:51:02.100Z (2026-10-02T00:51:02.100+07:00)
+  ['exit', '1'] SELL exit qty=0.00287 limit=63179.67 status=filled filled=0.00287 reason=- exit_reason=timeout
+      signal - | submitted 2026-10-01T18:01:02.100Z (2026-10-02T01:01:02.100+07:00) | ready 2026-10-01T18:01:02.350Z (2026-10-02T01:01:02.350+07:00) | closed 2026-10-01T18:01:04.100Z (2026-10-02T01:01:04.100+07:00)
+  ['2026-10-01T18:15:00.000Z', 'entry'] BUY entry qty=0.00288 limit=63682.72 status=filled filled=0.00288 reason=- exit_reason=-
+      signal 2026-10-01T18:16:00.500Z (2026-10-02T01:16:00.500+07:00) | submitted 2026-10-01T18:16:00.500Z (2026-10-02T01:16:00.500+07:00) | ready 2026-10-01T18:16:00.750Z (2026-10-02T01:16:00.750+07:00) | closed 2026-10-01T18:16:02.100Z (2026-10-02T01:16:02.100+07:00)
+  ['exit', '1'] SELL exit qty=0.00287 limit=62899.58 status=filled filled=0.00287 reason=- exit_reason=stop
+      signal - | submitted 2026-10-01T18:17:20.100Z (2026-10-02T01:17:20.100+07:00) | ready 2026-10-01T18:17:20.350Z (2026-10-02T01:17:20.350+07:00) | closed 2026-10-01T18:17:22.100Z (2026-10-02T01:17:22.100+07:00)
+  ['2026-10-01T18:25:00.000Z', 'entry'] BUY entry qty=0.0027 limit=63723.04 status=filled filled=0.0027 reason=- exit_reason=-
+      signal 2026-10-01T18:26:00.500Z (2026-10-02T01:26:00.500+07:00) | submitted 2026-10-01T18:26:00.500Z (2026-10-02T01:26:00.500+07:00) | ready 2026-10-01T18:26:00.750Z (2026-10-02T01:26:00.750+07:00) | closed 2026-10-01T18:26:02.100Z (2026-10-02T01:26:02.100+07:00)
+  ['exit', '1'] SELL exit qty=0.0027 limit=63512.99 status=filled filled=0.0027 reason=- exit_reason=timeout
+      signal - | submitted 2026-10-01T18:36:02.100Z (2026-10-02T01:36:02.100+07:00) | ready 2026-10-01T18:36:02.350Z (2026-10-02T01:36:02.350+07:00) | closed 2026-10-01T18:36:04.100Z (2026-10-02T01:36:04.100+07:00)
+  ['2026-10-01T18:50:00.000Z', 'entry'] BUY entry qty=0.00283 limit=63993.13 status=filled filled=0.00283 reason=- exit_reason=-
+      signal 2026-10-01T18:51:00.500Z (2026-10-02T01:51:00.500+07:00) | submitted 2026-10-01T18:51:00.500Z (2026-10-02T01:51:00.500+07:00) | ready 2026-10-01T18:51:00.750Z (2026-10-02T01:51:00.750+07:00) | closed 2026-10-01T18:51:02.100Z (2026-10-02T01:51:02.100+07:00)
+
+== Fills ==
+  BUY 0.00292 @ 61513.28 (bid 61505.12 / ask 61507.12, mid 61506.12) fee 0.00000292 BTC (=0.1796187776 USDT) usdt -179.6187776 btc 0.00291708 gross_pnl - net_pnl -
+      quote recv 2026-10-01T16:11:02.100Z (2026-10-01T23:11:02.100+07:00) exchange_time not supplied | fill 2026-10-01T16:11:02.100Z (2026-10-01T23:11:02.100+07:00) | commit 2026-10-01T16:11:02.100Z (2026-10-01T23:11:02.100+07:00)
+  SELL 0.00291 @ 62128.9 (bid 62135.12 / ask 62137.12, mid 62136.12) fee 0.180795099 USDT (=0.180795099 USDT) usdt 180.614303901 btc -0.00291 gross_pnl 1.7914542 net_pnl 1.4314762734~
+      quote recv 2026-10-01T16:14:38.100Z (2026-10-01T23:14:38.100+07:00) exchange_time not supplied | fill 2026-10-01T16:14:38.100Z (2026-10-01T23:14:38.100+07:00) | commit 2026-10-01T16:14:38.100Z (2026-10-01T23:14:38.100+07:00)
+  BUY 0.002 @ 62517.76 (bid 62509.5 / ask 62511.5, mid 62510.5) fee 0.000002 BTC (=0.12503552 USDT) usdt -125.03552 btc 0.001998 gross_pnl - net_pnl -
+      quote recv 2026-10-01T17:01:02.100Z (2026-10-02T00:01:02.100+07:00) exchange_time not supplied | fill 2026-10-01T17:01:02.100Z (2026-10-02T00:01:02.100+07:00) | commit 2026-10-01T17:01:02.100Z (2026-10-02T00:01:02.100+07:00)
+  SELL 0.001 @ 63153.35 (bid 63159.67 / ask 63161.67, mid 63160.67) fee 0.06315335 USDT (=0.06315335 USDT) usdt 63.09019665 btc -0.001 gross_pnl 0.6391368502~ net_pnl 0.5134067103~
+      quote recv 2026-10-01T17:02:54.100Z (2026-10-02T00:02:54.100+07:00) exchange_time not supplied | fill 2026-10-01T17:02:54.100Z (2026-10-02T00:02:54.100+07:00) | commit 2026-10-01T17:02:54.100Z (2026-10-02T00:02:54.100+07:00)
+  SELL 0.001 @ 63166.68 (bid 63173 / ask 63175, mid 63174) fee 0.06316668 USDT (=0.06316668 USDT) usdt 63.10351332 btc -0.001 gross_pnl 0.6524668502~ net_pnl 0.5267233803~
+      quote recv 2026-10-01T17:02:56.100Z (2026-10-02T00:02:56.100+07:00) exchange_time not supplied | fill 2026-10-01T17:02:56.100Z (2026-10-02T00:02:56.100+07:00) | commit 2026-10-01T17:02:56.100Z (2026-10-02T00:02:56.100+07:00)
+  BUY 0.00287 @ 63510.51 (bid 63502.15 / ask 63504.15, mid 63503.15) fee 0.00000287 BTC (=0.1822751637 USDT) usdt -182.2751637 btc 0.00286713 gross_pnl - net_pnl -
+      quote recv 2026-10-01T17:51:02.100Z (2026-10-02T00:51:02.100+07:00) exchange_time not supplied | fill 2026-10-01T17:51:02.100Z (2026-10-02T00:51:02.100+07:00) | commit 2026-10-01T17:51:02.100Z (2026-10-02T00:51:02.100+07:00)
+  SELL 0.00287 @ 63493.79 (bid 63500.15 / ask 63502.15, mid 63501.15) fee 0.1822271773 USDT (=0.1822271773 USDT) usdt 182.0449501227 btc -0.00287 gross_pnl -0.0429291063~ net_pnl -0.4076088426~
+      quote recv 2026-10-01T18:01:04.100Z (2026-10-02T01:01:04.100+07:00) exchange_time not supplied | fill 2026-10-01T18:01:04.100Z (2026-10-02T01:01:04.100+07:00) | commit 2026-10-01T18:01:04.100Z (2026-10-02T01:01:04.100+07:00)
+  BUY 0.00288 @ 63655.27 (bid 63646.9 / ask 63648.9, mid 63647.9) fee 0.00000288 BTC (=0.1833271776 USDT) usdt -183.3271776 btc 0.00287712 gross_pnl - net_pnl -
+      quote recv 2026-10-01T18:16:02.100Z (2026-10-02T01:16:02.100+07:00) exchange_time not supplied | fill 2026-10-01T18:16:02.100Z (2026-10-02T01:16:02.100+07:00) | commit 2026-10-01T18:16:02.100Z (2026-10-02T01:16:02.100+07:00)
+  SELL 0.00287 @ 63208.99 (bid 63215.32 / ask 63217.32, mid 63216.32) fee 0.1814098013 USDT (=0.1814098013 USDT) usdt 181.2283914987 btc -0.00287 gross_pnl -1.2805008354~ net_pnl -1.644783812~
+      quote recv 2026-10-01T18:17:22.100Z (2026-10-02T01:17:22.100+07:00) exchange_time not supplied | fill 2026-10-01T18:17:22.100Z (2026-10-02T01:17:22.100+07:00) | commit 2026-10-01T18:17:22.100Z (2026-10-02T01:17:22.100+07:00)
+  BUY 0.0027 @ 63701.57 (bid 63693.2 / ask 63695.2, mid 63694.2) fee 0.0000027 BTC (=0.171994239 USDT) usdt -171.994239 btc 0.0026973 gross_pnl - net_pnl -
+      quote recv 2026-10-01T18:26:02.100Z (2026-10-02T01:26:02.100+07:00) exchange_time not supplied | fill 2026-10-01T18:26:02.100Z (2026-10-02T01:26:02.100+07:00) | commit 2026-10-01T18:26:02.100Z (2026-10-02T01:26:02.100+07:00)
+  SELL 0.0027 @ 63828.76 (bid 63835.15 / ask 63837.15, mid 63836.15) fee 0.172337652 USDT (=0.172337652 USDT) usdt 172.165314348 btc -0.0027 gross_pnl 0.3438449675~ net_pnl -0.0006586575~
+      quote recv 2026-10-01T18:36:04.100Z (2026-10-02T01:36:04.100+07:00) exchange_time not supplied | fill 2026-10-01T18:36:04.100Z (2026-10-02T01:36:04.100+07:00) | commit 2026-10-01T18:36:04.100Z (2026-10-02T01:36:04.100+07:00)
+  BUY 0.00283 @ 63970.55 (bid 63962.15 / ask 63964.15, mid 63963.15) fee 0.00000283 BTC (=0.1810366565 USDT) usdt -181.0366565 btc 0.00282717 gross_pnl - net_pnl -
+      quote recv 2026-10-01T18:51:02.100Z (2026-10-02T01:51:02.100+07:00) exchange_time not supplied | fill 2026-10-01T18:51:02.100Z (2026-10-02T01:51:02.100+07:00) | commit 2026-10-01T18:51:02.100Z (2026-10-02T01:51:02.100+07:00)
+
+== Positions ==
+  2026-10-01T16:10:00.000Z entry 61513.28 qty 0.00291708 stop 61308.6 target 62127.32 status closed exit target residual 0.00000708 opened 2026-10-01T16:11:02.100Z (2026-10-01T23:11:02.100+07:00) closed 2026-10-01T16:14:38.100Z (2026-10-01T23:14:38.100+07:00)
+  2026-10-01T17:00:00.000Z entry 62517.76 qty 0.001998 stop 62311.6 target 63136.23 status closed exit target residual 0.00000508 opened 2026-10-01T17:01:02.100Z (2026-10-02T00:01:02.100+07:00) closed 2026-10-01T17:02:56.100Z (2026-10-02T00:02:56.100+07:00)
+  2026-10-01T17:50:00.000Z entry 63510.51 qty 0.00286713 stop 63303.95 target 64130.19 status closed exit timeout residual 0.00000221 opened 2026-10-01T17:51:02.100Z (2026-10-02T00:51:02.100+07:00) closed 2026-10-01T18:01:04.100Z (2026-10-02T01:01:04.100+07:00)
+  2026-10-01T18:15:00.000Z entry 63655.27 qty 0.00287712 stop 63450.29 target 64270.19 status closed exit stop residual 0.00000933 opened 2026-10-01T18:16:02.100Z (2026-10-02T01:16:02.100+07:00) closed 2026-10-01T18:17:22.100Z (2026-10-02T01:17:22.100+07:00)
+  2026-10-01T18:25:00.000Z entry 63701.57 qty 0.0026973 stop 63474.48 target 64382.84 status closed exit timeout residual 0.00000663 opened 2026-10-01T18:26:02.100Z (2026-10-02T01:26:02.100+07:00) closed 2026-10-01T18:36:04.100Z (2026-10-02T01:36:04.100+07:00)
+  2026-10-01T18:50:00.000Z entry 63970.55 qty 0.00282717 stop 63760.77 target 64599.87 status open exit - residual - opened 2026-10-01T18:51:02.100Z (2026-10-02T01:51:02.100+07:00) closed -
+
+== Risk ==
+  latches none · day 2026-10-02 baseline 1000.995526301 (pending False) · HWM 1002.153716271
+  2026-10-01T12:00:00.100Z (2026-10-01T19:00:00.100+07:00) day_rollover {"day": "2026-10-01", "latches_preserved": [], "previous_day": null, "timezone": "Asia/Jakarta"}
+  2026-10-01T12:00:00.100Z (2026-10-01T19:00:00.100+07:00) day_baseline_set {"day": "2026-10-01", "equity": "1000", "mark_quote": "q-000001"}
+  2026-10-01T12:00:00.100Z (2026-10-01T19:00:00.100+07:00) hwm_set {"equity": "1000", "mark_quote": "q-000001"}
+  2026-10-01T17:00:00.100Z (2026-10-02T00:00:00.100+07:00) day_rollover {"day": "2026-10-02", "latches_preserved": [], "previous_day": "2026-10-01", "timezone": "Asia/Jakarta"}
+  2026-10-01T17:00:00.100Z (2026-10-02T00:00:00.100+07:00) day_baseline_set {"day": "2026-10-02", "equity": "1000.995526301", "mark_quote": "q-018611"}
+
+== Health ==
+  counts {'quotes_fresh': 3, 'candle_rejected': 14, 'quotes_stale': 2} · unprotected exposure 68500000us
+  2026-10-01T12:07:30.000Z (2026-10-01T19:07:30.000+07:00) candle_rejected {"bar_start": "2026-10-01T12:07:00.000Z", "event_id": "c-29847607-partial", "reason": "unfinished_candle"}
+  2026-10-01T12:37:30.000Z (2026-10-01T19:37:30.000+07:00) candle_rejected {"bar_start": "2026-10-01T12:37:00.000Z", "event_id": "c-29847637-partial", "reason": "unfinished_candle"}
+  2026-10-01T13:07:30.000Z (2026-10-01T20:07:30.000+07:00) candle_rejected {"bar_start": "2026-10-01T13:07:00.000Z", "event_id": "c-29847667-partial", "reason": "unfinished_candle"}
+  2026-10-01T13:37:30.000Z (2026-10-01T20:37:30.000+07:00) candle_rejected {"bar_start": "2026-10-01T13:37:00.000Z", "event_id": "c-29847697-partial", "reason": "unfinished_candle"}
+  2026-10-01T14:07:30.000Z (2026-10-01T21:07:30.000+07:00) candle_rejected {"bar_start": "2026-10-01T14:07:00.000Z", "event_id": "c-29847727-partial", "reason": "unfinished_candle"}
+  2026-10-01T14:37:30.000Z (2026-10-01T21:37:30.000+07:00) candle_rejected {"bar_start": "2026-10-01T14:37:00.000Z", "event_id": "c-29847757-partial", "reason": "unfinished_candle"}
+  2026-10-01T15:07:30.000Z (2026-10-01T22:07:30.000+07:00) candle_rejected {"bar_start": "2026-10-01T15:07:00.000Z", "event_id": "c-29847787-partial", "reason": "unfinished_candle"}
+  2026-10-01T15:37:30.000Z (2026-10-01T22:37:30.000+07:00) candle_rejected {"bar_start": "2026-10-01T15:37:00.000Z", "event_id": "c-29847817-partial", "reason": "unfinished_candle"}
+  2026-10-01T16:07:30.000Z (2026-10-01T23:07:30.000+07:00) candle_rejected {"bar_start": "2026-10-01T16:07:00.000Z", "event_id": "c-29847847-partial", "reason": "unfinished_candle"}
+  2026-10-01T16:37:30.000Z (2026-10-01T23:37:30.000+07:00) candle_rejected {"bar_start": "2026-10-01T16:37:00.000Z", "event_id": "c-29847877-partial", "reason": "unfinished_candle"}
+  2026-10-01T17:07:30.000Z (2026-10-02T00:07:30.000+07:00) candle_rejected {"bar_start": "2026-10-01T17:07:00.000Z", "event_id": "c-29847907-partial", "reason": "unfinished_candle"}
+  2026-10-01T17:37:30.000Z (2026-10-02T00:37:30.000+07:00) candle_rejected {"bar_start": "2026-10-01T17:37:00.000Z", "event_id": "c-29847937-partial", "reason": "unfinished_candle"}
+  2026-10-01T18:07:30.000Z (2026-10-02T01:07:30.000+07:00) candle_rejected {"bar_start": "2026-10-01T18:07:00.000Z", "event_id": "c-29847967-partial", "reason": "unfinished_candle"}
+  2026-10-01T18:37:30.000Z (2026-10-02T01:37:30.000+07:00) candle_rejected {"bar_start": "2026-10-01T18:37:00.000Z", "event_id": "c-29847997-partial", "reason": "unfinished_candle"}
+
+== Rejected/duplicate inputs ==
+  seq 241 candle c-29847607-partial: {"reason": "unfinished_candle"}
+  seq 1202 candle c-29847637-partial: {"reason": "unfinished_candle"}
+  seq 2004 quote q-003873: {"first_seq": 2001, "reason": "event id already committed"}
+  seq 2164 candle c-29847667-partial: {"reason": "unfinished_candle"}
+  seq 3125 candle c-29847697-partial: {"reason": "unfinished_candle"}
+  seq 4086 candle c-29847727-partial: {"reason": "unfinished_candle"}
+  seq 5047 candle c-29847757-partial: {"reason": "unfinished_candle"}
+  seq 6008 candle c-29847787-partial: {"reason": "unfinished_candle"}
+  seq 6969 candle c-29847817-partial: {"reason": "unfinished_candle"}
+  seq 7930 candle c-29847847-partial: {"reason": "unfinished_candle"}
+  seq 8891 candle c-29847877-partial: {"reason": "unfinished_candle"}
+  seq 9852 candle c-29847907-partial: {"reason": "unfinished_candle"}
+  seq 10813 candle c-29847937-partial: {"reason": "unfinished_candle"}
+  seq 11774 candle c-29847967-partial: {"reason": "unfinished_candle"}
+  seq 12701 candle c-29847997-partial: {"reason": "unfinished_candle"}
+
+== Unresolved risk ==
+  open position paper-synthetic-demo|BTCUSDT|B20-T5-v1|3f9aba57ef97c6da|2026-10-01T18:50:00.000Z|pos (stop 63760.77, target 64599.87)
+  BTC inventory 0.0028338 (dust 0.0000038) remains; no closing fill invented

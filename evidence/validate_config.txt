@@ -1,0 +1,6 @@
+$ paperbot validate-config config/paper.toml
+PAPER | SYNTHETIC | configuration OK | account paper-synthetic-demo | BTCUSDT | B20-T5-v1
+config_sha256 3f9aba57ef97c6dab422298e5dbb26bdb9f98469e0b79baf8e4ea7c3c4e46d0b
+metadata SYNTHETIC retrieved 2026-10-09T04:46:08.396Z sha256 d1f5ef2bbeb9007e9d5456717d9cc0d12a5baf94fa81abfb9ba817427ac299ef
+live mode: not implemented (rejected)
+[exit 0]
