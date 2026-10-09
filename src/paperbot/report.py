@@ -39,8 +39,20 @@ def _sum(rows: list[dict], key: str) -> Decimal:
     return sum((Decimal(r[key]) for r in rows if r.get(key) is not None), ZERO)
 
 
-@exact
 def build_report(store: Storage) -> dict:
+    """Build the report from one consistent read snapshot (a single read transaction).
+
+    Without it, a report taken while the owner process is committing could mix two commits."""
+    conn = store.conn
+    conn.execute("BEGIN")
+    try:
+        return _build_report(store)
+    finally:
+        conn.execute("COMMIT")
+
+
+@exact
+def _build_report(store: Storage) -> dict:
     meta = store.meta()
     state = store.load_state()
     cfg = config_from_canonical(meta["config_canonical"])

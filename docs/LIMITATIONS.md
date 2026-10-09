@@ -44,6 +44,11 @@
   quote, rearm after health checks) is deliberately not implemented.
 - **Commit timestamps** are injected-clock times equal to the event's receipt time, so processing delay is
   modeled as zero.
+- **Read-only reports and the writer.** `status`/`report` read one consistent snapshot inside a single SQLite
+  read transaction, which holds a shared lock for a few milliseconds. The owner's commit waits for it (5 s
+  busy timeout). A reader holding the lock longer than that would make the owner's commit fail, and the
+  replay would halt safely and resume from its last commit. An early version read without a transaction and
+  could mix two commits; the evidence run caught this, it is fixed, and a regression test covers it.
 - **Throughput** is about 2-3 ms per event on local disk with `synchronous=FULL`, about 30 s for the
   13,230-event demo. The full test suite takes about 2-3 minutes.
 - **Text report rounding.** Long non-terminating decimals (EMA, ATR, proportional basis) are shown rounded

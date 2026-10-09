@@ -100,3 +100,32 @@ def test_two_simultaneous_replays_create_at_most_one_account(tmp_path):
     assert "LOCKED" in loser_err or "refusing to overwrite" in loser_err
     r = cli("report", "--state", str(db))
     assert r.returncode == 0 and "reconciliation OK" in r.stdout
+
+
+def test_read_only_status_during_a_live_replay_sees_consistent_snapshots(tmp_path):
+    from scenarios import rich_scenario
+
+    from paperbot.report import build_report
+    from paperbot.storage import Storage
+
+    cfg = write_config(tmp_path)
+    inp = rich_scenario().write(tmp_path / "in.jsonl")
+    db = tmp_path / "live.sqlite"
+    p = subprocess.Popen([PY, "-m", "paperbot", "replay", "--config", str(cfg), "--input", str(inp), "--state",
+                          str(db), "--quiet"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    seen = set()
+    while p.poll() is None:
+        if not db.exists() or db.stat().st_size == 0:
+            continue
+        try:
+            s = Storage.open_readonly(db)
+        except Exception:  # noqa: BLE001 - the file may still be mid-creation
+            continue
+        try:
+            r = build_report(s)
+        finally:
+            s.close()
+        assert r["reconciliation"]["ok"], r["reconciliation"]["problems"]
+        seen.add(r["cursor"]["seq"])
+    assert p.wait() == 0, p.stderr.read()
+    assert len(seen) > 3  # many distinct mid-run snapshots were checked

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 
 import pytest
@@ -51,7 +52,6 @@ def test_position_size_is_the_binding_cap_floored_to_step(tmp_path, cfg_path):
     sc.mid_quote(bb.end_us + 900 * MS, 61502)
     db = run(tmp_path, sc, cfg_path)
     (c,) = [c for c in report(db)["candidates"]["rows"] if c["status"] == "submitted"]
-    import json
 
     d = json.loads(c["detail"])
     caps = {k: D(v) for k, v in d["size_caps"].items()}
@@ -344,3 +344,26 @@ def test_quote_asset_buy_fee_mode_end_to_end(tmp_path):
     assert r["inventory"]["btc_total"] == 0
     assert r["balances"]["USDT"]["free"] == D(1000) + D(buy["usdt_delta"]) + D(sell["usdt_delta"])
     assert r["pnl"]["realized_net"] == r["balances"]["USDT"]["free"] - D(1000)
+
+
+def test_partial_fragment_below_min_notional_is_valid_and_leaves_unsellable_residual(tmp_path, cfg_path):
+    sc, bb = entry_scenario()
+    # 10% of 0.0007 visible = 0.00007 BTC (~4.3 USDT < 5 USDT minNotional): the *submitted* order passed the
+    # minimum; the fragment is not re-validated as if it were a new order.
+    sc.mid_quote(bb.end_us + 900 * MS, 61502, ask_qty="0.0007")
+    sc.mid_quote(bb.end_us + 30_000 * MS, 61000)  # stop trigger
+    sc.mid_quote(bb.end_us + 30_400 * MS, 61000)
+    db = run(tmp_path, sc, cfg_path)
+    o = entry_order(db)
+    (f,) = rows(db, "SELECT * FROM fills")
+    assert D(o["qty"]) * D(o["limit_price"]) >= 5
+    assert D(f["qty"]) == D("0.00007") and D(f["qty"]) * D(f["price"]) < 5
+    assert o["status"] == "partial"
+    (pos,) = rows(db, "SELECT * FROM positions")
+    assert pos["status"] == "closed" and pos["exit_reason"] == "stop"
+    assert json.loads(pos["close_detail"])["how"] == "residual_unsellable"
+    assert rows(db, "SELECT * FROM orders WHERE side = 'SELL'") == []  # no invalid sell was submitted
+    r = report(db)
+    assert r["inventory"]["btc_total"] == D("0.00007") * D("0.999") == r["inventory"]["dust_btc"]
+    assert r["inventory"]["basis_usdt"] == -D(f["usdt_delta"])  # retained with its basis, never deleted
+    assert r["reconciliation"]["ok"] and r["pnl"]["identity"]["holds"]
