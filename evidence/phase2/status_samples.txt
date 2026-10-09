@@ -1,0 +1,65 @@
+### paperbot status --state fwd.sqlite
+PAPER | PUBLIC DATA | FORWARD | MOCKED | BTCUSDT | B20-T5-v1 | account test-account
+cursor 335/0 · clock 2026-10-01T16:12:12.700Z · reconciliation OK
+config 99987130fefdf474 · input n/a · metadata PUBLIC (fetched, versioned)
+cash 1001.7600860184~ free + 0~ locked USDT · BTC 0.00000708 (sellable 0, dust 0.00000708)
+mark bid 61479 age 0us fresh · conservative equity 1001.7600860184~ · exposure 0.43527132~
+realized net 2.196006792~ · unrealized net (conservative) -0.4359207736~ · fees 0.3611551288 USDT value
+latches none
+feed: stream connected · quotes fresh (mark age 0us) · last 1m bar 2026-10-01T16:11:00.000Z · candle missing False
+entry blocks: none · recovery signaled True · metadata 383f49178441 age 1s
+queued exit: none · pending order: none · unprotected exposure (cumulative) 58s · outbox {'pending': 13}
+UNRESOLVED: BTC inventory 0.00000708 (dust 0.00000708) remains; no closing fill invented
+
+### paperbot positions --state fwd.sqlite
+PAPER | PUBLIC DATA | FORWARD | MOCKED | positions | clock 2026-10-01T16:12:12.700Z
+no open position
+queued exit: none · pending order: none
+inventory 0.00000708 BTC (sellable 0, dust 0.00000708, dust basis 0.4359207736~) · bid 61479 age 0us fresh · liquidation value 0
+UNRESOLVED: BTC inventory 0.00000708 (dust 0.00000708) remains; no closing fill invented
+
+### paperbot status --state replayed.sqlite
+PAPER | PUBLIC DATA | RECORDED REPLAY | MOCKED | BTCUSDT | B20-T5-v1 | account test-account
+cursor 335/335 · clock 2026-10-01T16:12:12.700Z · reconciliation OK
+config 99987130fefdf474 · input c4bc32e09724159d · metadata PUBLIC (fetched, versioned)
+cash 1001.7600860184~ free + 0~ locked USDT · BTC 0.00000708 (sellable 0, dust 0.00000708)
+mark bid 61479 age 0us fresh · conservative equity 1001.7600860184~ · exposure 0.43527132~
+realized net 2.196006792~ · unrealized net (conservative) -0.4359207736~ · fees 0.3611551288 USDT value
+latches none
+feed: stream connected · quotes fresh (mark age 0us) · last 1m bar 2026-10-01T16:11:00.000Z · candle missing False
+entry blocks: none · recovery signaled True · metadata 383f49178441 age 1s
+queued exit: none · pending order: none · unprotected exposure (cumulative) 58s · outbox {}
+UNRESOLVED: BTC inventory 0.00000708 (dust 0.00000708) remains; no closing fill invented
+
+### sessions (rows are written by the threaded runner `paperbot run`; this step-mode demo has none, see tests/test_runner_e2e.py)
+
+### outbox (notification texts written with their transitions; not sent: Telegram disabled)
+[pending] block:feed_disconnected:1 (block): PAPER | PUBLIC DATA | MOCKED | entries blocked: feed_disconnected
+[pending] block:restart_recovery:1 (block): PAPER | PUBLIC DATA | MOCKED | entries blocked: restart_recovery
+[pending] session:s1 (session): PAPER | PUBLIC DATA | MOCKED | session start s1; entries blocked until recovery
+[pending] unblock:feed_disconnected:256 (unblock): PAPER | PUBLIC DATA | MOCKED | entry block cleared: feed_disconnected
+[pending] unblock:restart_recovery:260 (unblock): PAPER | PUBLIC DATA | MOCKED | entry block cleared: restart_recovery
+[pending] fill:test-account|BTCUSDT|B20-T5-v1|99987130fefdf474|2026-10-01T16:10:00.000Z|entry|fill (fill): PAPER | PUBLIC DATA | MOCKED | SIMULATED BUY 0.00291708 BTC credited @ 61509.16 (filled); fee 0.00000292 BTC; stop 61304.48 target 62123.2
+[pending] exit_intent:test-account|BTCUSDT|B20-T5-v1|99987130fefdf474|2026-10-01T16:10:00.000Z|pos|exit-intent (exit_intent): PAPER | PUBLIC DATA | MOCKED | EXIT QUEUED (target) for 0.00291708 BTC; executes only on fresh quotes after latency
+[pending] fill:test-account|BTCUSDT|B20-T5-v1|99987130fefdf474|2026-10-01T16:10:00.000Z|pos|exit|1|fill (fill): PAPER | PUBLIC DATA | MOCKED | SIMULATED SELL 0.00291 BTC @ 62387.76 (target); net 2.196 USDT; fee 0.1815483816 USDT
+[pending] block:feed_disconnected:323 (block): PAPER | PUBLIC DATA | MOCKED | entries blocked: feed_disconnected
+[pending] block:restart_recovery:324 (block): PAPER | PUBLIC DATA | MOCKED | entries blocked: restart_recovery
+[pending] session:s2 (session): PAPER | PUBLIC DATA | MOCKED | session restart s2; entries blocked until recovery
+[pending] unblock:feed_disconnected:330 (unblock): PAPER | PUBLIC DATA | MOCKED | entry block cleared: feed_disconnected
+[pending] unblock:restart_recovery:334 (unblock): PAPER | PUBLIC DATA | MOCKED | entry block cleared: restart_recovery
+
+### feed / health events
+('candle_missing', 1)
+('candle_resumed', 1)
+('entry_block_cleared', 4)
+('entry_block_set', 4)
+('feed_clock_offset', 2)
+('feed_recovered', 2)
+('feed_session_stop', 1)
+('feed_ws_connected', 2)
+('metadata_version', 2)
+('quotes_fresh', 2)
+('quotes_stale', 1)
+('rearmed', 2)
+('session_start', 2)
+[exit 0]

@@ -1,0 +1,16 @@
+
+### public Binance hosts reachable from this environment?
+$ curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://api.binance.com/api/v3/time
+curl: (56) CONNECT tunnel failed, response 403
+http_code=000
+[exit 56]
+$ curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://data-api.binance.vision/api/v3/time
+curl: (56) CONNECT tunnel failed, response 403
+http_code=000
+[exit 56]
+$ curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://data-stream.binance.vision/
+curl: (56) CONNECT tunnel failed, response 403
+http_code=000
+[exit 56]
+
+http_code=000 / non-zero exit means the host was not reachable: no public-data session was possible here.

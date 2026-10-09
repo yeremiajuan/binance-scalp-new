@@ -1,0 +1,25 @@
+
+### grep for signing/credential/order/account/testnet code (expected: only the PAPER-only rejection text in cli.py/config.py; none in paperbot_net)
+$ grep -rniE hmac|X-MBX-APIKEY|/api/v3/order|/api/v3/account|userDataStream|listenKey|/sapi/|testnet --include=*.py src/paperbot_net src/paperbot
+src/paperbot/cli.py:22:LIVE_FLAGS = ("--live", "--testnet", "--real", "--mode")
+src/paperbot/cli.py:29:                f"{a!r} rejected: this tool is PAPER-only. Live/testnet execution is not implemented and cannot "
+src/paperbot/config.py:7:Validation is strict: unknown keys, binary floats, live/testnet modes and any
+src/paperbot/config.py:198:            if lk in ("live", "testnet") or any(f in lk for f in FORBIDDEN_KEY_FRAGMENTS):
+src/paperbot/config.py:201:                    "testnet, credential or endpoint settings"
+src/paperbot/config.py:256:            f"run.mode={run['mode']!r} rejected: only 'paper' exists. Live and testnet execution are not "
+[exit 0]
+
+### REST endpoints the network package can call
+$ python -c from paperbot_net.rest import ENDPOINTS; [print(k, v) for k, v in sorted(ENDPOINTS.items())]
+avgPrice ('/api/v3/avgPrice', 2)
+exchangeInfo ('/api/v3/exchangeInfo', 20)
+executionRules ('/api/v3/executionRules', 2)
+klines ('/api/v3/klines', 2)
+referencePrice ('/api/v3/referencePrice', 2)
+time ('/api/v3/time', 1)
+[exit 0]
+
+### HTTP methods used by the REST client
+$ grep -n method= src/paperbot_net/rest.py
+74:        req = urllib.request.Request(url, method="GET", headers={"User-Agent": "paperbot-paper/0.2 (public data)"})
+[exit 0]
