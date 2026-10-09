@@ -1,8 +1,8 @@
 PAPER | SYNTHETIC | BTCUSDT | B20-T5-v1 | account paper-synthetic-demo
-cursor 13230/13230 · clock 2026-10-01T18:54:00.600Z · reconciliation OK
-config 3f9aba57ef97c6da · input 8b92caa29bbf6c93 · metadata SYNTHETIC d1f5ef2bbeb9007e (retrieved 2026-10-09T04:46:08.396Z)
+cursor 13230/13230 · clock 2026-10-01T18:54:00.500Z · reconciliation OK
+config 3f9aba57ef97c6da · input 492505935743a253 · metadata SYNTHETIC d1f5ef2bbeb9007e (retrieved 2026-10-09T04:46:08.396Z)
 cash 818.9591354404 free + 0 locked USDT · BTC 0.0028338 (sellable 0.00283, dust 0.0000038)
-mark bid 63974 age 0us fresh · conservative equity 999.8064151324 · exposure 181.2895212
+mark bid 63974 age 400000us fresh · conservative equity 999.8064151324 · exposure 181.2895212
 realized net 0.4185550519~ · unrealized net (conservative) -0.6121399195~ · fees 1.866377294 USDT value
 latches none
 UNRESOLVED: open position paper-synthetic-demo|BTCUSDT|B20-T5-v1|3f9aba57ef97c6da|2026-10-01T18:50:00.000Z|pos (stop 63760.77, target 64599.87)
@@ -18,7 +18,7 @@ PAPER | SYNTHETIC: simulated fills on synthetic fixtures. Engineering evidence o
   metadata_label: SYNTHETIC
   metadata_retrieved_at: 2026-10-09T04:46:08.396Z
   input_path: fixtures/synthetic_demo.jsonl
-  input_sha256: 8b92caa29bbf6c93dbd8dd2e282dc52e0026e7e892d2753d9e723af937911c1b
+  input_sha256: 492505935743a253ad4ab469281d37cd16b1bb14575dbd4004b97ad61d423f9a
   input_events: 13230
   config: {"account": {"starting_btc": "0", "starting_usdt": "1000"}, "execution": {"buy_limit_cushion_bps": "5", "candle_max_lateness_ms": 5000, "latency_ms": 250, "max_entry_drift_atr": "0.25", "max_spread_bps": "5", "participation_fraction": "0.1", "quote_max_age_ms": 2000, "reference_max_age_ms": 120000, "sell_limit_cushion_bps": "50", "signal_expiry_ms": 5000, "slippage_bps": "1"}, "fees": {"buy_fee_asset": "BTC", "buy_fee_bps": "10", "sell_fee_bps": "10"}, "risk": {"daily_loss_fraction": "0.01", "day_timezone": "Asia/Jakarta", "drawdown_fraction": "0.03", "max_exposure_fraction": "0.2", "risk_per_entry_fraction": "0.001"}, "run": {"account_id": "paper-synthetic-demo", "mode": "paper", "strategy": "B20-T5-v1", "symbol": "BTCUSDT"}}
   input dispositions: {'accepted': 13215, 'rejected': 14, 'duplicate': 1}
@@ -52,7 +52,7 @@ PAPER | SYNTHETIC: simulated fills on synthetic fixtures. Engineering evidence o
       signal 2026-10-01T16:11:00.500Z (2026-10-01T23:11:00.500+07:00) | submitted 2026-10-01T16:11:00.500Z (2026-10-01T23:11:00.500+07:00) | ready 2026-10-01T16:11:00.750Z (2026-10-01T23:11:00.750+07:00) | closed 2026-10-01T16:11:02.100Z (2026-10-01T23:11:02.100+07:00)
   ['exit', '1'] SELL exit qty=0.00291 limit=61818.65 status=filled filled=0.00291 reason=- exit_reason=target
       signal - | submitted 2026-10-01T16:14:36.100Z (2026-10-01T23:14:36.100+07:00) | ready 2026-10-01T16:14:36.350Z (2026-10-01T23:14:36.350+07:00) | closed 2026-10-01T16:14:38.100Z (2026-10-01T23:14:38.100+07:00)
-  ['2026-10-01T17:00:00.000Z', 'entry'] BUY entry qty=0.00289 limit=62532.75 status=partial filled=0.002 reason=ioc_remainder_canceled exit_reason=-
+  ['2026-10-01T17:00:00.000Z', 'entry'] BUY entry qty=0.00289 limit=62532.75 status=partial filled=0.002 reason=ioc_remainder_canceled;fill_cap=visible_liquidity exit_reason=-
       signal 2026-10-01T17:01:00.500Z (2026-10-02T00:01:00.500+07:00) | submitted 2026-10-01T17:01:00.500Z (2026-10-02T00:01:00.500+07:00) | ready 2026-10-01T17:01:00.750Z (2026-10-02T00:01:00.750+07:00) | closed 2026-10-01T17:01:02.100Z (2026-10-02T00:01:02.100+07:00)
   ['exit', '1'] SELL exit qty=0.002 limit=62830.6 status=partial filled=0.001 reason=ioc_remainder_canceled exit_reason=target
       signal - | submitted 2026-10-01T17:02:52.100Z (2026-10-02T00:02:52.100+07:00) | ready 2026-10-01T17:02:52.350Z (2026-10-02T00:02:52.350+07:00) | closed 2026-10-01T17:02:54.100Z (2026-10-02T00:02:54.100+07:00)
@@ -66,7 +66,7 @@ PAPER | SYNTHETIC: simulated fills on synthetic fixtures. Engineering evidence o
       signal - | submitted 2026-10-01T18:01:02.100Z (2026-10-02T01:01:02.100+07:00) | ready 2026-10-01T18:01:02.350Z (2026-10-02T01:01:02.350+07:00) | closed 2026-10-01T18:01:04.100Z (2026-10-02T01:01:04.100+07:00)
   ['2026-10-01T18:15:00.000Z', 'entry'] BUY entry qty=0.00288 limit=63682.72 status=filled filled=0.00288 reason=- exit_reason=-
       signal 2026-10-01T18:16:00.500Z (2026-10-02T01:16:00.500+07:00) | submitted 2026-10-01T18:16:00.500Z (2026-10-02T01:16:00.500+07:00) | ready 2026-10-01T18:16:00.750Z (2026-10-02T01:16:00.750+07:00) | closed 2026-10-01T18:16:02.100Z (2026-10-02T01:16:02.100+07:00)
-  ['exit', '1'] SELL exit qty=0.00287 limit=62899.58 status=filled filled=0.00287 reason=- exit_reason=stop
+  ['exit', '1'] SELL exit qty=0.00287 limit=62899.58 status=filled filled=0.00287 reason=- exit_reason=health:quotes_stale
       signal - | submitted 2026-10-01T18:17:20.100Z (2026-10-02T01:17:20.100+07:00) | ready 2026-10-01T18:17:20.350Z (2026-10-02T01:17:20.350+07:00) | closed 2026-10-01T18:17:22.100Z (2026-10-02T01:17:22.100+07:00)
   ['2026-10-01T18:25:00.000Z', 'entry'] BUY entry qty=0.0027 limit=63723.04 status=filled filled=0.0027 reason=- exit_reason=-
       signal 2026-10-01T18:26:00.500Z (2026-10-02T01:26:00.500+07:00) | submitted 2026-10-01T18:26:00.500Z (2026-10-02T01:26:00.500+07:00) | ready 2026-10-01T18:26:00.750Z (2026-10-02T01:26:00.750+07:00) | closed 2026-10-01T18:26:02.100Z (2026-10-02T01:26:02.100+07:00)
@@ -105,7 +105,7 @@ PAPER | SYNTHETIC: simulated fills on synthetic fixtures. Engineering evidence o
   2026-10-01T16:10:00.000Z entry 61513.28 qty 0.00291708 stop 61308.6 target 62127.32 status closed exit target residual 0.00000708 opened 2026-10-01T16:11:02.100Z (2026-10-01T23:11:02.100+07:00) closed 2026-10-01T16:14:38.100Z (2026-10-01T23:14:38.100+07:00)
   2026-10-01T17:00:00.000Z entry 62517.76 qty 0.001998 stop 62311.6 target 63136.23 status closed exit target residual 0.00000508 opened 2026-10-01T17:01:02.100Z (2026-10-02T00:01:02.100+07:00) closed 2026-10-01T17:02:56.100Z (2026-10-02T00:02:56.100+07:00)
   2026-10-01T17:50:00.000Z entry 63510.51 qty 0.00286713 stop 63303.95 target 64130.19 status closed exit timeout residual 0.00000221 opened 2026-10-01T17:51:02.100Z (2026-10-02T00:51:02.100+07:00) closed 2026-10-01T18:01:04.100Z (2026-10-02T01:01:04.100+07:00)
-  2026-10-01T18:15:00.000Z entry 63655.27 qty 0.00287712 stop 63450.29 target 64270.19 status closed exit stop residual 0.00000933 opened 2026-10-01T18:16:02.100Z (2026-10-02T01:16:02.100+07:00) closed 2026-10-01T18:17:22.100Z (2026-10-02T01:17:22.100+07:00)
+  2026-10-01T18:15:00.000Z entry 63655.27 qty 0.00287712 stop 63450.29 target 64270.19 status closed exit health:quotes_stale residual 0.00000933 opened 2026-10-01T18:16:02.100Z (2026-10-02T01:16:02.100+07:00) closed 2026-10-01T18:17:22.100Z (2026-10-02T01:17:22.100+07:00)
   2026-10-01T18:25:00.000Z entry 63701.57 qty 0.0026973 stop 63474.48 target 64382.84 status closed exit timeout residual 0.00000663 opened 2026-10-01T18:26:02.100Z (2026-10-02T01:26:02.100+07:00) closed 2026-10-01T18:36:04.100Z (2026-10-02T01:36:04.100+07:00)
   2026-10-01T18:50:00.000Z entry 63970.55 qty 0.00282717 stop 63760.77 target 64599.87 status open exit - residual - opened 2026-10-01T18:51:02.100Z (2026-10-02T01:51:02.100+07:00) closed -
 
@@ -118,7 +118,7 @@ PAPER | SYNTHETIC: simulated fills on synthetic fixtures. Engineering evidence o
   2026-10-01T17:00:00.100Z (2026-10-02T00:00:00.100+07:00) day_baseline_set {"day": "2026-10-02", "equity": "1000.995526301", "mark_quote": "q-018611"}
 
 == Health ==
-  counts {'quotes_fresh': 3, 'candle_rejected': 14, 'quotes_stale': 2} · unprotected exposure 68500000us
+  counts {'quotes_fresh': 2, 'candle_rejected': 14, 'quotes_stale': 1, 'exit_waiting': 1} · unprotected exposure 68000000us
   2026-10-01T12:07:30.000Z (2026-10-01T19:07:30.000+07:00) candle_rejected {"bar_start": "2026-10-01T12:07:00.000Z", "event_id": "c-29847607-partial", "reason": "unfinished_candle"}
   2026-10-01T12:37:30.000Z (2026-10-01T19:37:30.000+07:00) candle_rejected {"bar_start": "2026-10-01T12:37:00.000Z", "event_id": "c-29847637-partial", "reason": "unfinished_candle"}
   2026-10-01T13:07:30.000Z (2026-10-01T20:07:30.000+07:00) candle_rejected {"bar_start": "2026-10-01T13:07:00.000Z", "event_id": "c-29847667-partial", "reason": "unfinished_candle"}
@@ -132,6 +132,7 @@ PAPER | SYNTHETIC: simulated fills on synthetic fixtures. Engineering evidence o
   2026-10-01T17:07:30.000Z (2026-10-02T00:07:30.000+07:00) candle_rejected {"bar_start": "2026-10-01T17:07:00.000Z", "event_id": "c-29847907-partial", "reason": "unfinished_candle"}
   2026-10-01T17:37:30.000Z (2026-10-02T00:37:30.000+07:00) candle_rejected {"bar_start": "2026-10-01T17:37:00.000Z", "event_id": "c-29847937-partial", "reason": "unfinished_candle"}
   2026-10-01T18:07:30.000Z (2026-10-02T01:07:30.000+07:00) candle_rejected {"bar_start": "2026-10-01T18:07:00.000Z", "event_id": "c-29847967-partial", "reason": "unfinished_candle"}
+  2026-10-01T18:17:00.150Z (2026-10-02T01:17:00.150+07:00) exit_waiting {"intent_id": "paper-synthetic-demo|BTCUSDT|B20-T5-v1|3f9aba57ef97c6da|2026-10-01T18:15:00.000Z|pos|exit-intent", "note": "inventory retained; no protective fill is invented", "reason": "awaiting_fresh_quote"}
   2026-10-01T18:37:30.000Z (2026-10-02T01:37:30.000+07:00) candle_rejected {"bar_start": "2026-10-01T18:37:00.000Z", "event_id": "c-29847997-partial", "reason": "unfinished_candle"}
 
 == Rejected/duplicate inputs ==

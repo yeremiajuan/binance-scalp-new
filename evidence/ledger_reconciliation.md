@@ -1,6 +1,6 @@
 # PAPER | SYNTHETIC ledger reconciliation
 
-State `/home/user/binance-scalp-new/evidence/demo_state.sqlite` · account `paper-synthetic-demo` · config `3f9aba57ef97c6da` · input `8b92caa29bbf6c93` · metadata SYNTHETIC `d1f5ef2bbeb9007e`
+State `/home/user/binance-scalp-new/evidence/demo_state.sqlite` · account `paper-synthetic-demo` · config `3f9aba57ef97c6da` · input `492505935743a253` · metadata SYNTHETIC `d1f5ef2bbeb9007e`
 
 Assumptions from the stored configuration: buy fee 0.0010 (BTC), sell fee 0.0010 (USDT), slippage 0.0001 per side, tick 0.01. Spread is paid by crossing bid/ask and is not charged again.
 

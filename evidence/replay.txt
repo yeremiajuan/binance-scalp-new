@@ -1,21 +1,21 @@
-$ python scripts/make_demo_fixture.py /tmp/tmp.mYMShwaC8p/regenerated.jsonl
-wrote /tmp/tmp.mYMShwaC8p/regenerated.jsonl (13230 events)
+$ python scripts/make_demo_fixture.py /tmp/tmp.LZuiSPlGfz/regenerated.jsonl
+wrote /tmp/tmp.LZuiSPlGfz/regenerated.jsonl (13230 events)
 [exit 0]
-$ cmp /tmp/tmp.mYMShwaC8p/regenerated.jsonl fixtures/synthetic_demo.jsonl
+$ cmp /tmp/tmp.LZuiSPlGfz/regenerated.jsonl fixtures/synthetic_demo.jsonl
 [exit 0]
 fixture regenerates byte-for-byte
 $ sha256sum config/paper.toml fixtures/synthetic_demo.jsonl fixtures/exchange_info_btcusdt_synthetic.json
 5760c67460dd5e34a68c8284b7dd90861175bb3d2cf434a73d68f84930157069  config/paper.toml
-8b92caa29bbf6c93dbd8dd2e282dc52e0026e7e892d2753d9e723af937911c1b  fixtures/synthetic_demo.jsonl
+492505935743a253ad4ab469281d37cd16b1bb14575dbd4004b97ad61d423f9a  fixtures/synthetic_demo.jsonl
 d1f5ef2bbeb9007e9d5456717d9cc0d12a5baf94fa81abfb9ba817427ac299ef  fixtures/exchange_info_btcusdt_synthetic.json
 [exit 0]
 $ paperbot replay --config config/paper.toml --input fixtures/synthetic_demo.jsonl --state /home/user/binance-scalp-new/evidence/demo_state.sqlite
-PAPER | SYNTHETIC | replay: processed 13230 events, cursor 13230/13230 | input sha256 8b92caa29bbf6c93dbd8dd2e282dc52e0026e7e892d2753d9e723af937911c1b | dispositions {'accepted': 13215, 'rejected': 14, 'duplicate': 1}
+PAPER | SYNTHETIC | replay: processed 13230 events, cursor 13230/13230 | input sha256 492505935743a253ad4ab469281d37cd16b1bb14575dbd4004b97ad61d423f9a | dispositions {'accepted': 13215, 'rejected': 14, 'duplicate': 1}
 PAPER | SYNTHETIC | BTCUSDT | B20-T5-v1 | account paper-synthetic-demo
-cursor 13230/13230 · clock 2026-10-01T18:54:00.600Z · reconciliation OK
-config 3f9aba57ef97c6da · input 8b92caa29bbf6c93 · metadata SYNTHETIC d1f5ef2bbeb9007e (retrieved 2026-10-09T04:46:08.396Z)
+cursor 13230/13230 · clock 2026-10-01T18:54:00.500Z · reconciliation OK
+config 3f9aba57ef97c6da · input 492505935743a253 · metadata SYNTHETIC d1f5ef2bbeb9007e (retrieved 2026-10-09T04:46:08.396Z)
 cash 818.9591354404 free + 0 locked USDT · BTC 0.0028338 (sellable 0.00283, dust 0.0000038)
-mark bid 63974 age 0us fresh · conservative equity 999.8064151324 · exposure 181.2895212
+mark bid 63974 age 400000us fresh · conservative equity 999.8064151324 · exposure 181.2895212
 realized net 0.4185550519~ · unrealized net (conservative) -0.6121399195~ · fees 1.866377294 USDT value
 latches none
 UNRESOLVED: open position paper-synthetic-demo|BTCUSDT|B20-T5-v1|3f9aba57ef97c6da|2026-10-01T18:50:00.000Z|pos (stop 63760.77, target 64599.87)

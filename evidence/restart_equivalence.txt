@@ -1,4 +1,4 @@
-$ python scripts/crash_resume_demo.py config/paper.toml fixtures/synthetic_demo.jsonl /home/user/binance-scalp-new/evidence/demo_state.sqlite /tmp/tmp.mYMShwaC8p
+$ python scripts/crash_resume_demo.py config/paper.toml fixtures/synthetic_demo.jsonl /home/user/binance-scalp-new/evidence/demo_state.sqlite /tmp/tmp.LZuiSPlGfz
 [1] crash before_commit of seq 9646: committed cursor 9645; input_log rows for that seq: 0
 [2] crash after_commit of seq 9705: committed cursor 9705 (committed, never acknowledged)
 [3] resumed to cursor 11247; pending orders [('paper-synthetic-demo|BTCUSDT|B20-T5-v1|3f9aba57ef97c6da|2026-10-01T17:50:00.000Z|entry', '182.339423')]
@@ -9,23 +9,23 @@ $ python scripts/crash_resume_demo.py config/paper.toml fixtures/synthetic_demo.
 [5] final resume: 0 events -> cursor 13230/13230
 [6] resume of a finished replay processed 0 events (idempotent)
 [exit 0]
-$ python scripts/compare_states.py /home/user/binance-scalp-new/evidence/demo_state.sqlite /tmp/tmp.mYMShwaC8p/restarted.sqlite
+$ python scripts/compare_states.py /home/user/binance-scalp-new/evidence/demo_state.sqlite /tmp/tmp.LZuiSPlGfz/restarted.sqlite
 table              rows A   rows B  match  sha256(A)[:16]
 balances                2        2  yes    1d2185472a8b2f8c
-candidates             17       17  yes    9602e531c8979c24
+candidates             17       17  yes    ad6e7a1de83f6136
 control_events          0        0  yes    4f53cda18c2baa0c
-cursor                  1        1  yes    b60416b91d4ff50e
-engine_state            1        1  yes    5de28e7efc33a3ef
-exit_intents            5        5  yes    b3c8813edc6ea33d
+cursor                  1        1  yes    6eabde9f8e281b79
+engine_state            1        1  yes    613915c94fbc6b65
+exit_intents            5        5  yes    b47e756b3ec4cfea
 fills                  12       12  yes    3b35adc0544932cd
-health_events          19       19  yes    4b2cfa4f0cb36f92
-input_log           13230    13230  yes    b2ae50afd9d2b79b
+health_events          18       18  yes    bfc0f8c0b89322f4
+input_log           13230    13230  yes    f58e6fe4eb976b8e
 ledger                 47       47  yes    46c10d102ef24a0d
-meta                   17       17  yes    6b22ab7806829807
-orders                 13       13  yes    88541bdd53cfda45
-positions               6        6  yes    6708d16ca2dacd3d
+meta                   17       17  yes    e516df31d0c7ec88
+orders                 13       13  yes    38f9f32add90f5ac
+positions               6        6  yes    b29de37e41d96df5
 risk_events             5        5  yes    2e1dfaf108c65d63
-source_events       13229    13229  yes    a8ab11f4a5496c9f
-sqlite_sequence         3        3  yes    2a503e267fc1e3c3
+source_events       13229    13229  yes    7dc4cb48faa48c8d
+sqlite_sequence         3        3  yes    40bd627ea4dd61b5
 IDENTICAL
 [exit 0]

@@ -7,12 +7,25 @@ $ python3 --version
 Python 3.13.16
 [exit 0]
 $ git rev-parse HEAD
-01f9ad3afd9e29ff25e503a9ec5c0c844100e18c
+47efbe5a7aa5dfbd73862c8d6b5d7550385540c4
 [exit 0]
 $ git status --porcelain
-?? evidence/
+ D evidence/SHA256SUMS
+ D evidence/demo_report.json
+ D evidence/demo_report.txt
+ D evidence/demo_state.sqlite
+ M evidence/environment.txt
+ D evidence/kill_reset.txt
+ D evidence/ledger_reconciliation.md
+ D evidence/live_rejection.txt
+ D evidence/pytest.txt
+ D evidence/replay.txt
+ D evidence/restart_equivalence.txt
+ D evidence/ruff.txt
+ D evidence/two_process_lock.txt
+ D evidence/validate_config.txt
 [exit 0]
-clean venv: /tmp/tmp.mYMShwaC8p/venv
+clean venv: /tmp/tmp.LZuiSPlGfz/venv
 $ python --version
 Python 3.13.16
 [exit 0]

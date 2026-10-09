@@ -5,6 +5,6 @@ PAPER | REJECTED: '--live' rejected: this tool is PAPER-only. Live/testnet execu
 $ paperbot replay --mode=live --config c --input i --state s
 PAPER | REJECTED: '--mode=live' rejected: this tool is PAPER-only. Live/testnet execution is not implemented and cannot be enabled from the command line.
 [exit 2]
-$ paperbot validate-config /tmp/tmp.mYMShwaC8p/live.toml
+$ paperbot validate-config /tmp/tmp.LZuiSPlGfz/live.toml
 PAPER | REJECTED: run.mode='live' rejected: only 'paper' exists. Live and testnet execution are not implemented and cannot be enabled by configuration.
 [exit 2]
