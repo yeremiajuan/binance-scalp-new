@@ -1,0 +1,42 @@
+# PAPER-only configuration for the Phase 1 offline core.
+# Every value is an unvalidated hypothesis, not a recommendation.
+# Decimals are strings on purpose: binary TOML floats are rejected.
+# B20-T5-v1 strategy constants are frozen in code (src/paperbot/strategy.py).
+
+[run]
+mode = "paper"                 # the only mode; "live"/"testnet" are rejected
+account_id = "paper-synthetic-demo"
+symbol = "BTCUSDT"
+strategy = "B20-T5-v1"
+
+[account]
+starting_usdt = "1000"
+starting_btc = "0"             # Phase 1 requires 0
+
+[fees]
+buy_fee_bps = "10"             # effective taker fee assumption, not a verified account rate
+sell_fee_bps = "10"
+buy_fee_asset = "BTC"          # "BTC" (base, default) or "USDT" (quote); BNB is unsupported
+
+[execution]
+slippage_bps = "1"             # adverse, per side
+latency_ms = 250               # submission -> order readiness
+quote_max_age_ms = 2000
+candle_max_lateness_ms = 5000
+signal_expiry_ms = 5000
+max_spread_bps = "5"           # full spread vs midpoint
+max_entry_drift_atr = "0.25"
+buy_limit_cushion_bps = "5"
+sell_limit_cushion_bps = "50"
+participation_fraction = "0.10" # of visible opposing best-quote size
+reference_max_age_ms = 120000  # synthetic weighted-average reference price freshness
+
+[risk]
+max_exposure_fraction = "0.20"
+risk_per_entry_fraction = "0.001"
+daily_loss_fraction = "0.01"
+drawdown_fraction = "0.03"
+day_timezone = "Asia/Jakarta"
+
+[metadata]
+path = "../fixtures/exchange_info_btcusdt_synthetic.json"

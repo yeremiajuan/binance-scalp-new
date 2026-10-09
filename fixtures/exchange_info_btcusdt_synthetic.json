@@ -1,0 +1,24 @@
+{
+  "label": "SYNTHETIC",
+  "retrieved_at": "2026-10-09T04:46:08.396Z",
+  "description": "SYNTHETIC Phase 1 fixture. PRICE_FILTER tickSize, LOT_SIZE stepSize/minQty, NOTIONAL minNotional/applyMinToMarket and MARKET_LOT_SIZE zeros mirror the dated public BTCUSDT exchangeInfo snapshot observed at the retrieved_at server time (see PROJECT_PLAN.md). Every other value (min/max price, maxQty, maxNotional, PERCENT_PRICE_BY_SIDE multipliers, order limits) is a synthetic stand-in. Not a permanent exchange default, not account-specific, and it says nothing about commissions or private filters. Refresh dynamically in Phase 2.",
+  "symbol": {
+    "symbol": "BTCUSDT",
+    "status": "TRADING",
+    "baseAsset": "BTC",
+    "quoteAsset": "USDT",
+    "isSpotTradingAllowed": true,
+    "orderTypes": ["LIMIT", "LIMIT_MAKER", "MARKET", "STOP_LOSS_LIMIT", "TAKE_PROFIT_LIMIT"],
+    "filters": [
+      {"filterType": "PRICE_FILTER", "minPrice": "0.01", "maxPrice": "1000000.00", "tickSize": "0.01"},
+      {"filterType": "LOT_SIZE", "minQty": "0.00001", "maxQty": "9000.00000", "stepSize": "0.00001"},
+      {"filterType": "ICEBERG_PARTS", "limit": 10},
+      {"filterType": "MARKET_LOT_SIZE", "minQty": "0.00000", "maxQty": "100.00000", "stepSize": "0.00000"},
+      {"filterType": "TRAILING_DELTA", "minTrailingAboveDelta": 10, "maxTrailingAboveDelta": 2000, "minTrailingBelowDelta": 10, "maxTrailingBelowDelta": 2000},
+      {"filterType": "PERCENT_PRICE_BY_SIDE", "bidMultiplierUp": "5", "bidMultiplierDown": "0.2", "askMultiplierUp": "5", "askMultiplierDown": "0.2", "avgPriceMins": 5},
+      {"filterType": "NOTIONAL", "minNotional": "5.00000000", "applyMinToMarket": true, "maxNotional": "9000000.00000000", "applyMaxToMarket": false, "avgPriceMins": 5},
+      {"filterType": "MAX_NUM_ORDERS", "maxNumOrders": 200},
+      {"filterType": "MAX_NUM_ALGO_ORDERS", "maxNumAlgoOrders": 5}
+    ]
+  }
+}
