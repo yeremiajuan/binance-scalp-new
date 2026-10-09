@@ -27,7 +27,11 @@ from .engine import EngineState, Recorder, detail_json
 from .events import RawEvent
 from .money import dtext
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
+# v1 (Phase 1) databases remain readable and resumable for synthetic replay: Phase 2 tables are additive and are
+# only written by forward/public-data sessions.
+SUPPORTED_SCHEMAS = ("1", "2")
+PUBLIC_EVIDENCE = ("PUBLIC", "PUBLIC_RECORDED_REPLAY")
 NETWORK_FS = {"nfs", "nfs4", "cifs", "smb3", "smbfs", "fuse.sshfs", "9p", "afs", "ceph", "glusterfs",
               "fuse.glusterfs", "davfs", "fuse.davfs2", "lustre", "gpfs", "fuse.rclone", "fuse.s3fs"}
 
@@ -85,6 +89,16 @@ CREATE TABLE control_events(id INTEGER PRIMARY KEY AUTOINCREMENT, at_cursor INTE
     effective_us INTEGER, wall_utc TEXT NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('kill','reset')),
     latch TEXT NOT NULL, reason TEXT NOT NULL, latches_after TEXT NOT NULL);
 CREATE INDEX ledger_seq ON ledger(seq);
+CREATE TABLE input_payloads(seq INTEGER PRIMARY KEY REFERENCES input_log(seq), payload TEXT NOT NULL);
+CREATE TABLE metadata_versions(sha256 TEXT PRIMARY KEY, fetched_us INTEGER NOT NULL, first_seq INTEGER NOT NULL,
+    json TEXT NOT NULL);
+CREATE TABLE outbox(msg_id TEXT PRIMARY KEY, seq INTEGER, created_us INTEGER NOT NULL, kind TEXT NOT NULL,
+    text TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('pending','sent','ambiguous','failed','dropped')),
+    attempts INTEGER NOT NULL DEFAULT 0, last_attempt_wall TEXT, last_error TEXT, sent_wall TEXT);
+CREATE TABLE sessions(session_id TEXT PRIMARY KEY, kind TEXT NOT NULL, started_wall TEXT NOT NULL,
+    start_cursor INTEGER NOT NULL, code_revision TEXT NOT NULL, stopped_wall TEXT, end_cursor INTEGER,
+    stop_reason TEXT);
+CREATE TABLE manifest(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
 
 FaultHook = "Callable[[str, int], None]"
@@ -174,6 +188,50 @@ class StateLock:
         self.release()
 
 
+class ProfileLock:
+    """Exclusive OS lock for one paper account id (profile), independent of the state path, so two state
+    databases cannot run the same paper account at the same time on this machine."""
+
+    def __init__(self, lock_dir: str | os.PathLike, account_id: str):
+        import hashlib
+
+        self.account_id = account_id
+        self.lock_dir = os.path.realpath(os.path.expanduser(os.fspath(lock_dir)))
+        digest = hashlib.sha256(account_id.encode()).hexdigest()[:24]
+        self.lock_path = os.path.join(self.lock_dir, f"account-{digest}.lock")
+        self.fd: int | None = None
+
+    def acquire(self) -> ProfileLock:
+        import fcntl
+
+        os.makedirs(self.lock_dir, mode=0o700, exist_ok=True)
+        fd = os.open(self.lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(fd)
+            raise StateLocked(f"paper account {self.account_id!r} is already owned by another process "
+                              f"(profile lock {self.lock_path})") from None
+        os.ftruncate(fd, 0)
+        os.write(fd, f"pid={os.getpid()} account={self.account_id}\n".encode())
+        self.fd = fd
+        return self
+
+    def release(self) -> None:
+        if self.fd is not None:
+            import fcntl
+
+            fcntl.flock(self.fd, fcntl.LOCK_UN)
+            os.close(self.fd)
+            self.fd = None
+
+    def __enter__(self) -> ProfileLock:
+        return self.acquire()
+
+    def __exit__(self, *exc) -> None:
+        self.release()
+
+
 # --------------------------------------------------------------------- storage
 
 
@@ -193,6 +251,8 @@ class Storage:
         self.path = path
         self.readonly = readonly
         self.fault_hook = None  # tests/evidence only: callable(point, seq) raising to simulate a crash
+        # Public-data sessions persist every normalized input line with its commit (recorded-session replay).
+        self.record_payloads = False
 
     # -- opening
 
@@ -219,6 +279,7 @@ class Storage:
             )
         conn = cls._connect(path, readonly=False)
         store = cls(conn, path, readonly=False)
+        store.record_payloads = meta.get("evidence") in PUBLIC_EVIDENCE
         conn.execute("BEGIN IMMEDIATE")
         try:
             for stmt in DDL.strip().split(";\n"):
@@ -269,9 +330,10 @@ class Storage:
             version = store.meta().get("schema_version")
         except sqlite3.DatabaseError as exc:
             raise StateError(f"state database {path} has no readable meta table: {exc}") from exc
-        if version != SCHEMA_VERSION:
+        if version not in SUPPORTED_SCHEMAS:
             conn.close()
-            raise StateError(f"incompatible schema version {version!r}; expected {SCHEMA_VERSION!r}")
+            raise StateError(f"incompatible schema version {version!r}; expected one of {SUPPORTED_SCHEMAS}")
+        store.record_payloads = store.meta().get("evidence") in PUBLIC_EVIDENCE
         return store
 
     def close(self) -> None:
@@ -295,6 +357,68 @@ class Storage:
         row = self.conn.execute("SELECT seq, clock_us FROM cursor WHERE id = 1").fetchone()
         return row["seq"], row["clock_us"]
 
+    def has_table(self, name: str) -> bool:
+        return self.conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone() \
+            is not None
+
+    def metadata_bundle(self, sha256: str) -> str | None:
+        if not self.has_table("metadata_versions"):
+            return None
+        row = self.conn.execute("SELECT json FROM metadata_versions WHERE sha256 = ?", (sha256,)).fetchone()
+        return None if row is None else row["json"]
+
+    def payloads(self) -> list[tuple[int, str]]:
+        if not self.has_table("input_payloads"):
+            return []
+        return [(r[0], r[1]) for r in self.conn.execute("SELECT seq, payload FROM input_payloads ORDER BY seq")]
+
+    def manifest(self) -> dict[str, str]:
+        if not self.has_table("manifest"):
+            return {}
+        return {r["key"]: r["value"] for r in self.conn.execute("SELECT key, value FROM manifest")}
+
+    # -- non-economic owner writes (sessions, manifest, outbox delivery state); each is its own transaction
+
+    def _small_write(self, sql_args: list[tuple[str, tuple]]) -> None:
+        if self.readonly:
+            raise StateError("read-only storage")
+        c = self.conn
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            for sql, args in sql_args:
+                c.execute(sql, args)
+            c.execute("COMMIT")
+        except BaseException:
+            if c.in_transaction:
+                c.execute("ROLLBACK")
+            raise
+
+    def put_manifest(self, items: dict[str, str]) -> None:
+        self._small_write([("INSERT INTO manifest(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET "
+                            "value = excluded.value", (k, v)) for k, v in items.items()])
+
+    def start_session(self, session_id: str, kind: str, wall: str, cursor: int, code_revision: str) -> None:
+        self._small_write([("INSERT INTO sessions(session_id, kind, started_wall, start_cursor, code_revision) "
+                            "VALUES (?, ?, ?, ?, ?)", (session_id, kind, wall, cursor, code_revision))])
+
+    def stop_session(self, session_id: str, wall: str, cursor: int, reason: str) -> None:
+        self._small_write([("UPDATE sessions SET stopped_wall = ?, end_cursor = ?, stop_reason = ? "
+                            "WHERE session_id = ?", (wall, cursor, reason, session_id))])
+
+    def outbox_update(self, msg_id: str, status: str, attempts: int, wall: str, error: str | None) -> None:
+        sent = wall if status == "sent" else None
+        self._small_write([("UPDATE outbox SET status = ?, attempts = ?, last_attempt_wall = ?, last_error = ?, "
+                            "sent_wall = coalesce(?, sent_wall) WHERE msg_id = ?",
+                            (status, attempts, wall, error, sent, msg_id))])
+
+    def outbox_insert(self, msg_id: str, created_us: int, kind: str, text: str) -> None:
+        self._small_write([("INSERT OR IGNORE INTO outbox(msg_id, seq, created_us, kind, text, status, attempts) "
+                            "VALUES (?, NULL, ?, ?, ?, 'pending', 0)", (msg_id, created_us, kind, text))])
+
+    def outbox_prune(self, before_us: int) -> None:
+        self._small_write([("DELETE FROM outbox WHERE status IN ('sent','failed','dropped') AND created_us < ?",
+                            (before_us,))])
+
     def source_event_seq(self, event_id: str) -> int | None:
         row = self.conn.execute("SELECT seq FROM source_events WHERE event_id = ?", (event_id,)).fetchone()
         return None if row is None else row["seq"]
@@ -313,6 +437,13 @@ class Storage:
                 cols = list(row)
                 c.execute(
                     f"INSERT INTO {table}({', '.join(cols)}) VALUES ({', '.join('?' for _ in cols)})",
+                    [_sql_value(row[k]) for k in cols],
+                )
+            elif op[0] == "insert_ignore":
+                _, table, row = op
+                cols = list(row)
+                c.execute(
+                    f"INSERT OR IGNORE INTO {table}({', '.join(cols)}) VALUES ({', '.join('?' for _ in cols)})",
                     [_sql_value(row[k]) for k in cols],
                 )
             elif op[0] == "update":
@@ -349,6 +480,10 @@ class Storage:
             )
             if rec.source_event_id is not None:
                 c.execute("INSERT INTO source_events(event_id, seq) VALUES (?, ?)", (rec.source_event_id, raw.seq))
+            if self.record_payloads:
+                if raw.line is None:
+                    raise StateError("public-data sessions must persist the normalized input line")
+                c.execute("INSERT INTO input_payloads(seq, payload) VALUES (?, ?)", (raw.seq, raw.line))
             self._apply_ops(rec)
             self._write_state(state)
             self._fault("before_commit", raw.seq)

@@ -18,8 +18,25 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 from .config import Config
-from .constraints import MetadataError, Reference, SymbolRules, validate_limit_order
-from .events import CandleEvent, HeartbeatEvent, QuoteEvent, RawEvent, ReferenceEvent
+from .constraints import (
+    MetadataError,
+    Reference,
+    SymbolRules,
+    execution_rule_violation,
+    parse_metadata,
+    validate_limit_order,
+)
+from .events import (
+    CandleEvent,
+    FeedEvent,
+    HeartbeatEvent,
+    MetadataEvent,
+    QuoteEvent,
+    RawEvent,
+    ReferenceEvent,
+    RefPriceEvent,
+    SessionStartEvent,
+)
 from .execution import (
     QuoteView,
     buy_fill_price,
@@ -100,6 +117,23 @@ class RefObs:
 
 
 @dataclass
+class RefPriceObs:
+    """Latest exchange reference price observation; value None = the exchange reports no reference price."""
+
+    event_id: str
+    recv_us: int
+    value: Decimal | None
+    exchange_us: int | None
+
+
+# Entry blocks raised by forward-runner health events; any block stops new entries.
+BLOCK_FEED = "feed_disconnected"
+BLOCK_REST = "rest_unavailable"
+BLOCK_CLOCK = "clock_unsynced"
+BLOCK_RECOVERY = "restart_recovery"
+
+
+@dataclass
 class PendingOrder:
     order_id: str
     side: str
@@ -151,6 +185,8 @@ class Health:
     unprotected_since_us: int | None = None
     unprotected_total_us: int = 0
     candle_missing: bool = False
+    blocks: list[str] = field(default_factory=list)
+    recovery_signaled: bool = False
 
 
 @dataclass
@@ -171,6 +207,10 @@ class EngineState:
     bars_since_exit: int
     candidates_seen: int = 0
     notes: dict[str, str] = field(default_factory=dict)
+    metadata_hash: str | None = None  # active metadata version (forward/public sessions)
+    metadata_fetched_us: int | None = None
+    ref_price: RefPriceObs | None = None
+    session_id: str | None = None
 
 
 class Recorder:
@@ -195,6 +235,9 @@ class Recorder:
     def risk(self, kind: str, **detail) -> None:
         self.insert("risk_events", {"seq": self.seq, "ts_us": self.now, "kind": kind, "detail": detail})
 
+    def insert_ignore(self, table: str, row: dict) -> None:
+        self.ops.append(("insert_ignore", table, row))
+
 
 def initial_state(cfg: Config) -> EngineState:
     return EngineState(
@@ -216,16 +259,35 @@ def initial_state(cfg: Config) -> EngineState:
 
 
 class Engine:
-    def __init__(self, cfg: Config, rules: SymbolRules, store, state: EngineState):
-        if rules.symbol != cfg.symbol or rules.base_asset != "BTC" or rules.quote_asset != "USDT":
-            raise MetadataError(
-                f"metadata symbol {rules.symbol} ({rules.base_asset}/{rules.quote_asset}) does not match {cfg.symbol}"
-            )
+    def __init__(self, cfg: Config, rules: SymbolRules | None, store, state: EngineState):
+        """``rules`` is the fixed metadata of a synthetic run; forward/public sessions pass None and receive
+        versioned metadata as input events (the active version is part of the committed state)."""
+        if rules is not None:
+            self._check_rules(rules)
         self.cfg = cfg
+        self.base_rules = rules
         self.rules = rules
         self.store = store
         self.state = state
         self.halted = False
+        self.notify = False  # forward runner: write PAPER notifications to the outbox with each transition
+        self.notify_label = "PAPER | PUBLIC DATA"
+        self._rules_cache: dict[str, SymbolRules] = {}
+
+    def _check_rules(self, rules: SymbolRules) -> None:
+        if rules.symbol != "BTCUSDT" or rules.base_asset != "BTC" or rules.quote_asset != "USDT":
+            raise MetadataError(f"metadata symbol {rules.symbol} ({rules.base_asset}/{rules.quote_asset}) is not "
+                                "BTCUSDT")
+
+    def _rules_for(self, st: EngineState) -> SymbolRules | None:
+        if st.metadata_hash is None:
+            return self.base_rules
+        if st.metadata_hash not in self._rules_cache:
+            text = self.store.metadata_bundle(st.metadata_hash)
+            if text is None:
+                raise MetadataError(f"metadata version {st.metadata_hash} is not stored")
+            self._rules_cache[st.metadata_hash] = parse_metadata(text)
+        return self._rules_cache[st.metadata_hash]
 
     # ------------------------------------------------------------------ public
 
@@ -294,6 +356,27 @@ class Engine:
             "kind": kind, "order_id": order_id, "fill_id": fill_id,
         })
 
+    def _notify(self, rec: Recorder, kind: str, ref: str, text: str) -> None:
+        """Queue a PAPER notification in the same transaction as the transition it describes."""
+        if self.notify:
+            rec.insert_ignore("outbox", {
+                "msg_id": f"{kind}:{ref}", "seq": rec.seq, "created_us": rec.now, "kind": kind,
+                "text": f"{self.notify_label} | {text}", "status": "pending", "attempts": 0,
+            })
+
+    def _set_block(self, st: EngineState, rec: Recorder, block: str, add: bool, **detail) -> None:
+        blocks = st.health.blocks
+        if add and block not in blocks:
+            blocks.append(block)
+            rec.health("entry_block_set", block=block, **detail)
+            self._notify(rec, "block", f"{block}:{rec.seq}", f"entries blocked: {block}")
+            if st.order is not None and st.order.purpose == "entry":
+                self._close_order(st, rec, "canceled", "entry_block:" + block, None)
+        elif not add and block in blocks:
+            blocks.remove(block)
+            rec.health("entry_block_cleared", block=block, **detail)
+            self._notify(rec, "unblock", f"{block}:{rec.seq}", f"entry block cleared: {block}")
+
     def _fresh_quote(self, st: EngineState) -> QuoteObs | None:
         q = st.last_quote
         if q is None or not st.health.quotes_fresh:
@@ -306,9 +389,31 @@ class Engine:
         return value(st.balances, st.pool, self.rules, bid, slippage=self.cfg.slippage, sell_fee=self.cfg.sell_fee,
                      sell_cushion=self.cfg.sell_limit_cushion)
 
-    def _reference(self, st: EngineState) -> Reference | None:
+    def _avg_reference(self, st: EngineState) -> Reference | None:
         r = st.reference
         return None if r is None else Reference(r.avg_price, r.mins, r.recv_us, r.event_id)
+
+    def _ref_price_known(self, st: EngineState) -> bool:
+        rp = st.ref_price
+        return rp is not None and 0 <= st.clock_us - rp.recv_us <= self.cfg.reference_max_age_us
+
+    def _reference(self, st: EngineState) -> Reference | None:
+        """Reference for PERCENT_PRICE filters: the exchange reference price when non-null, otherwise the
+        weighted average; an unknown or stale reference price means the reference is unavailable."""
+        if self.rules is None or self.rules.reference_mode == "avg_price":
+            return self._avg_reference(st)
+        if not self._ref_price_known(st):
+            return None
+        rp = st.ref_price
+        if rp.value is not None:
+            return Reference(rp.value, 0, rp.recv_us, rp.event_id, kind="reference_price")
+        return self._avg_reference(st)
+
+    def _execution_block(self, st: EngineState, side: str, price: Decimal) -> str | None:
+        if self.rules is None or not self.rules.execution_rules:
+            return None
+        known = self._ref_price_known(st)
+        return execution_rule_violation(self.rules, side, price, st.ref_price.value if known else None, known)
 
     def _candidate_id(self, bar_start_us: int) -> str:
         return f"{self.cfg.account_id}|{self.cfg.symbol}|{STRATEGY_VERSION}|{self.cfg.sha256[:16]}|{iso(bar_start_us)}"
@@ -328,6 +433,9 @@ class Engine:
         rec.source_event_id = ev.event_id
         st.clock_us = ev.recv_us
         rec.now = ev.recv_us
+        if isinstance(ev, MetadataEvent):
+            self._on_metadata(st, rec, ev)
+        self.rules = self._rules_for(st)
         triggers: list[str] = []
         self._housekeeping(st, rec, triggers, ev)
         disposition, detail = "accepted", {}
@@ -337,10 +445,83 @@ class Engine:
             disposition, detail = self._on_quote(st, rec, ev, triggers)
         elif isinstance(ev, ReferenceEvent):
             st.reference = RefObs(ev.event_id, ev.recv_us, ev.avg_price, ev.mins)
-        elif isinstance(ev, HeartbeatEvent):
+        elif isinstance(ev, RefPriceEvent):
+            st.ref_price = RefPriceObs(ev.event_id, ev.recv_us, ev.value, ev.exchange_us)
+        elif isinstance(ev, FeedEvent):
+            self._on_feed(st, rec, ev, triggers)
+        elif isinstance(ev, SessionStartEvent):
+            self._on_session_start(st, rec, ev, triggers)
+        elif isinstance(ev, HeartbeatEvent | MetadataEvent):
             pass
         self._post(st, rec, triggers)
         return disposition, detail
+
+    # ------------------------------------------------------- forward events
+
+    def _on_metadata(self, st: EngineState, rec: Recorder, ev: MetadataEvent) -> None:
+        rules = parse_metadata(ev.bundle)
+        self._check_rules(rules)
+        rec.insert_ignore("metadata_versions", {"sha256": ev.sha256, "fetched_us": ev.fetched_us,
+                                                 "first_seq": rec.seq, "json": ev.bundle})
+        self._rules_cache[ev.sha256] = rules
+        changed = st.metadata_hash != ev.sha256
+        st.metadata_hash = ev.sha256
+        st.metadata_fetched_us = ev.fetched_us
+        rec.health("metadata_version" if changed else "metadata_refreshed", sha256=ev.sha256,
+                   fetched=iso(ev.fetched_us), label=rules.label, status=rules.status,
+                   execution_rules=len(rules.execution_rules))
+
+    def _on_feed(self, st: EngineState, rec: Recorder, ev: FeedEvent, triggers: list[str]) -> None:
+        detail = json.loads(ev.detail)
+        rec.health("feed_" + ev.kind, **detail)
+        if ev.kind == "ws_disconnected":
+            self._set_block(st, rec, BLOCK_FEED, True, reason=detail.get("reason"))
+            triggers.append("health:feed_disconnected")
+        elif ev.kind == "ws_connected":
+            self._set_block(st, rec, BLOCK_FEED, False)
+        elif ev.kind == "rest_unavailable":
+            self._set_block(st, rec, BLOCK_REST, True, reason=detail.get("reason"))
+        elif ev.kind == "rest_ok":
+            self._set_block(st, rec, BLOCK_REST, False)
+        elif ev.kind == "clock_offset":
+            limit = self.cfg.clock_max_offset_us
+            offset = int(detail.get("offset_us", 0))
+            if limit is not None:
+                self._set_block(st, rec, BLOCK_CLOCK, abs(offset) > limit, offset_us=offset)
+        elif ev.kind == "recovered":
+            st.health.recovery_signaled = True
+        elif ev.kind == "session_stop":
+            self._set_block(st, rec, BLOCK_FEED, True, reason="session_stop")
+
+    def _on_session_start(self, st: EngineState, rec: Recorder, ev: SessionStartEvent, triggers: list[str]) -> None:
+        """Forward-runner start/restart policy: cancel unfilled entries, retire unresolved exit attempts without
+        inventing fills, block entries until recovery, and flatten recovered tradable inventory."""
+        st.session_id = ev.session_id
+        retired = None
+        if st.order is not None:
+            retired = st.order.order_id
+            if st.order.purpose == "entry":
+                self._close_order(st, rec, "canceled", "forward_restart", None)
+            else:
+                self._close_order(st, rec, "zero", "retired_on_restart", None)
+        st.health.recovery_signaled = False
+        if st.health.quotes_fresh:
+            # a quote observed by a previous process is not a fresh observation of this session: flattening and
+            # every other decision waits for quotes received after the restart
+            st.health.quotes_fresh = False
+            st.health.stale_since_us = st.clock_us
+            if st.balances.btc_total > 0:
+                st.health.unprotected_since_us = st.clock_us
+            rec.health("quotes_stale", stale_since=iso(st.clock_us), reason="session_start",
+                       inventory_exposed=st.balances.btc_total > 0)
+        self._set_block(st, rec, BLOCK_FEED, True, reason="session_start")
+        self._set_block(st, rec, BLOCK_RECOVERY, True, reason="session_start")
+        rec.health("session_start", session=ev.session_id, restart=ev.restart, retired_order=retired,
+                   position=st.position.position_id if st.position else None)
+        self._notify(rec, "session", ev.session_id, f"session {'restart' if ev.restart else 'start'} "
+                     f"{ev.session_id}; entries blocked until recovery")
+        if st.position is not None:
+            triggers.append("health:restart_flatten")
 
     # ------------------------------------------------------------ housekeeping
 
@@ -370,7 +551,8 @@ class Engine:
 
         last = st.strategy.last_start_us
         # The expected bar itself arriving past the deadline is "late" (handled in _on_candle), not "missing".
-        is_expected_bar = isinstance(ev, CandleEvent) and last is not None and ev.start_us == last + MINUTE_US
+        is_expected_bar = isinstance(ev, CandleEvent) and last is not None and (
+            ev.backfill or ev.start_us == last + MINUTE_US)
         if last is not None and not st.health.candle_missing and not is_expected_bar:
             next_end = last + 2 * MINUTE_US
             if now > next_end + cfg.candle_max_lateness_us:
@@ -429,7 +611,7 @@ class Engine:
         if st.health.candle_missing:
             st.health.candle_missing = False
             rec.health("candle_resumed", bar_start=iso(ev.start_us))
-        late = ev.recv_us - end > cfg.candle_max_lateness_us
+        late = ev.recv_us - end > cfg.candle_max_lateness_us and not ev.backfill
         bar = Bar(ev.start_us, end, ev.open, ev.high, ev.low, ev.close, ev.recv_us)
         res = strategy_update(st.strategy, bar)
         if res.reset:
@@ -450,12 +632,12 @@ class Engine:
             if st.position is not None:
                 triggers.append("trend_invalidation")
         if res.crossing:
-            self._candidate(st, rec, res, late)
+            self._candidate(st, rec, res, late, backfill=ev.backfill)
         if st.last_exit_us is not None and bar.start_us >= st.last_exit_us:
             st.bars_since_exit += 1
         return "accepted", {"late": late} if late else {}
 
-    def _candidate(self, st: EngineState, rec: Recorder, res: BarResult, late: bool) -> None:
+    def _candidate(self, st: EngineState, rec: Recorder, res: BarResult, late: bool, backfill: bool = False) -> None:
         cfg, rules, now, bar = self.cfg, self.rules, st.clock_us, res.bar
         cid = self._candidate_id(bar.start_us)
         st.candidates_seen += 1
@@ -477,6 +659,8 @@ class Engine:
             rec.insert("candidates", row)
 
         reasons: list[str] = []
+        if backfill:
+            reasons.append("backfill_no_retroactive_entry")
         if not res.warm:
             reasons.append("warmup_incomplete")
         if late:
@@ -493,6 +677,15 @@ class Engine:
             reasons.append("risk_latch:" + ",".join(st.risk.latches))
         if st.risk.baseline_pending:
             reasons.append("day_baseline_pending")
+        if st.health.blocks:
+            reasons.append("entry_block:" + ",".join(st.health.blocks))
+        if rules is None:
+            reasons.append("metadata_missing")
+        elif (st.metadata_fetched_us is not None and cfg.metadata_max_age_us is not None
+              and now - st.metadata_fetched_us > cfg.metadata_max_age_us):
+            reasons.append("metadata_expired")
+        if rules is None:
+            return skip(reasons)
         q = self._fresh_quote(st)
         if q is None:
             reasons.append("no_fresh_quote")
@@ -532,6 +725,9 @@ class Engine:
             return skip([gate.reason])
         if exp_buy > limit:
             return skip(["limit_below_expected_fill"])
+        blocked = self._execution_block(st, "BUY", exp_buy)
+        if blocked is not None:
+            return skip([blocked])
 
         v = self._value(st, q.bid)
         equity = v.equity
@@ -648,6 +844,9 @@ class Engine:
             return self._close_order(st, rec, "canceled", "guard_failed_at_fill:" + guard, q)
         if price > o.limit_price:
             return self._close_order(st, rec, "zero", "price_protection", q)
+        blocked = self._execution_block(st, "BUY", price)
+        if blocked is not None:  # the exchange would expire this taker order
+            return self._close_order(st, rec, "zero", blocked, q)
         # Fill-time caps, recomputed from this observation: the submitted quantity is never enlarged, and the
         # fill never exceeds the modeled risk budget or exposure headroom at current equity, d + p*C.
         v = self._value(st, q.bid)
@@ -698,6 +897,9 @@ class Engine:
         status = "filled" if qty == o.qty else "partial"
         reason = None if status == "filled" else f"ioc_remainder_canceled;fill_cap={binding}"
         self._close_order(st, rec, status, reason, q, filled_qty=qty, spent=amounts.usdt_debit)
+        self._notify(rec, "fill", fill_id, f"SIMULATED BUY {dtext(amounts.btc_credit)} BTC credited @ {dtext(price)} "
+                     f"({status}); fee {dtext(amounts.fee_amount)} {amounts.fee_asset}; stop {dtext(pos.stop_price)} "
+                     f"target {dtext(pos.target_price)}")
 
     def _fill_exit(self, st: EngineState, rec: Recorder, o: PendingOrder, q: QuoteObs) -> None:
         cfg, rules = self.cfg, self.rules
@@ -707,6 +909,10 @@ class Engine:
         price = sell_fill_price(q.bid, cfg.slippage, rules.tick)
         if price < o.limit_price:
             self._close_order(st, rec, "zero", "price_protection", q)
+            return
+        blocked = self._execution_block(st, "SELL", price)
+        if blocked is not None:
+            self._close_order(st, rec, "zero", blocked, q)
             return
         qty = fill_quantity(o.qty, q.bid_qty, cfg.participation, rules.step)
         if qty <= 0:
@@ -727,6 +933,8 @@ class Engine:
         self._ledger(st, rec, "BTC", ZERO, -qty, "sell_fill", o.order_id, fill_id)
         self._ledger(st, rec, "USDT", amounts.usdt_credit, ZERO, "sell_fill", o.order_id, fill_id)
         remove_from_pool(st.pool, qty, gross_alloc, fee_alloc)
+        self._notify(rec, "fill", fill_id, f"SIMULATED SELL {dtext(qty)} BTC @ {dtext(price)} ({intent.reason}); "
+                     f"net {dtext(net_pnl.quantize(Decimal('0.0001')))} USDT; fee {dtext(amounts.fee_amount)} USDT")
         status = "filled" if qty == o.qty else "partial"
         self._close_order(st, rec, status, None if status == "filled" else "ioc_remainder_canceled", q,
                           filled_qty=qty, spent=qty)
@@ -771,7 +979,7 @@ class Engine:
 
     def _post(self, st: EngineState, rec: Recorder, triggers: list[str]) -> None:
         cfg = self.cfg
-        q = self._fresh_quote(st)
+        q = self._fresh_quote(st) if self.rules is not None else None
         if q is not None:
             v = self._value(st, q.bid)
             r = st.risk
@@ -796,10 +1004,16 @@ class Engine:
                     rec.risk("latch_set", latch=latch, equity=v.equity, reference_equity=ref, loss_fraction=loss,
                              threshold=threshold, overshoot_fraction=loss - threshold, mark_quote=q.event_id,
                              note="protective latch, not a guaranteed loss cap")
+                    self._notify(rec, "latch", f"{latch}:{rec.seq}", f"RISK LATCH {latch}: loss {dtext(loss)} "
+                                 f">= {dtext(threshold)}; entries halted; exit queued")
                     if st.order is not None and st.order.purpose == "entry":
                         self._close_order(st, rec, "canceled", "risk_latch:" + latch, None)
                     triggers.append("halt")
 
+        if (BLOCK_RECOVERY in st.health.blocks and st.health.recovery_signaled and st.position is None
+                and st.order is None):
+            self._set_block(st, rec, BLOCK_RECOVERY, False, note="recovered; no tradable position or order")
+            rec.health("rearmed", session=st.session_id)
         pos = st.position
         if pos is not None and pos.exit_intent is None and triggers:
             reason = min(triggers, key=_priority)
@@ -810,8 +1024,13 @@ class Engine:
                 "created_us": st.clock_us, "status": "active", "attempts": 0, "closed_us": None,
                 "detail": {"triggers": sorted(set(triggers), key=_priority)},
             })
+            self._notify(rec, "exit_intent", intent.intent_id, f"EXIT QUEUED ({reason}) for "
+                         f"{dtext(st.balances.btc_total)} BTC; executes only on fresh quotes after latency")
         if st.position is not None and st.position.exit_intent is not None and st.order is None:
-            self._submit_exit(st, rec)
+            if self.rules is None:
+                self._exit_blocked(rec, st.position.exit_intent, "metadata_missing")
+            else:
+                self._submit_exit(st, rec)
 
     def _submit_exit(self, st: EngineState, rec: Recorder) -> None:
         cfg, rules, now = self.cfg, self.rules, st.clock_us

@@ -96,18 +96,22 @@ def open_engine(lock: StateLock, *, config: Config | None = None, input_sha: str
     store = Storage.open_existing(lock)
     try:
         meta = store.meta()
-        if meta.get("mode") != "PAPER" or meta.get("evidence") != "SYNTHETIC":
-            raise StateError("state is not a PAPER/SYNTHETIC Phase 1 account")
+        if meta.get("mode") != "PAPER" or meta.get("evidence") not in ("SYNTHETIC", "PUBLIC"):
+            raise StateError("state is not a PAPER synthetic or forward account")
         stored_cfg = config_from_canonical(meta["config_canonical"])
-        rules = parse_metadata(meta["metadata_json"])
+        public = meta["evidence"] == "PUBLIC"
+        if public and config is not None:
+            raise StateError("forward accounts are resumed with 'paperbot run', not synthetic 'resume'")
+        rules = None if public else parse_metadata(meta["metadata_json"])
         if config is not None and config.sha256 != stored_cfg.sha256:
             raise StateError(
                 f"configuration changed: state {stored_cfg.sha256[:12]} vs supplied {config.sha256[:12]}. "
                 "A configuration change is a new run/version; it cannot resume this account."
             )
         state = store.load_state()
-        require_reconciled(store, state, config_sha=stored_cfg.sha256, metadata_sha=rules.sha256,
-                           input_sha=input_sha, input_events=input_events)
+        require_reconciled(store, state, config_sha=stored_cfg.sha256,
+                           metadata_sha=None if public else rules.sha256, input_sha=input_sha,
+                           input_events=input_events)
         return Engine(stored_cfg, rules, store, state)
     except BaseException:
         store.close()

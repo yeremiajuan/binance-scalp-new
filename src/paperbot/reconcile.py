@@ -8,7 +8,7 @@ from decimal import Decimal
 from . import codec
 from .constraints import parse_metadata
 from .engine import EngineState
-from .events import CandleEvent, QuoteEvent, RawEvent, ReferenceEvent
+from .events import CandleEvent, InputError, QuoteEvent, RawEvent, ReferenceEvent, parse_event
 from .money import ZERO, ceil_to, exact, floor_to
 from .storage import Storage
 from .strategy import TARGET_STOP_MULT, Bar, StrategyState
@@ -135,9 +135,13 @@ def reconcile(store: Storage, state: EngineState, *, config_sha: str | None = No
     want_pos = [state.position.position_id] if state.position is not None else []
     if open_pos != want_pos:
         p.append(f"open positions {open_pos} != snapshot {want_pos}")
-    tick = parse_metadata(meta["metadata_json"]).tick
+    rules = active_rules(store, state, meta)
+    tick = rules.tick if rules is not None else None
     if state.position is not None and open_pos == want_pos:
-        p += _check_position(c, state, tick)
+        if tick is None:
+            p.append("open position without any metadata version")
+        else:
+            p += _check_position(c, state, tick)
     active = [r["intent_id"] for r in c.execute("SELECT intent_id FROM exit_intents WHERE status = 'active'")]
     want_active = ([state.position.exit_intent.intent_id]
                    if state.position is not None and state.position.exit_intent is not None else [])
@@ -149,6 +153,12 @@ def reconcile(store: Storage, state: EngineState, *, config_sha: str | None = No
     if closed != state.last_exit_us:
         p.append(f"last exit time {state.last_exit_us} != latest closed position {closed}")
     p += _check_risk_marks(c, state)
+    if store.record_payloads:
+        p += _check_payloads(store, state)
+        if input_events is None:
+            input_events = payload_events(store)
+    if state.metadata_hash is not None and store.metadata_bundle(state.metadata_hash) is None:
+        p.append(f"active metadata version {state.metadata_hash} is not stored")
     if input_events is not None:
         p += _check_inputs(c, state, input_events)
 
@@ -253,6 +263,35 @@ def _check_risk_marks(c, state: EngineState) -> list[str]:
             _same(p, "day baseline", r.day_baseline, d["equity"])
             _same(p, "baseline day", r.day, d["day"])
     return p
+
+
+def active_rules(store: Storage, state: EngineState, meta: dict | None = None):
+    """Exchange rules in force: the active metadata version (public sessions) or the fixture (synthetic)."""
+    meta = meta if meta is not None else store.meta()
+    if state.metadata_hash is not None:
+        text = store.metadata_bundle(state.metadata_hash)
+        return None if text is None else parse_metadata(text)
+    return parse_metadata(meta["metadata_json"]) if meta.get("metadata_json") else None
+
+
+def payload_events(store: Storage) -> list[RawEvent]:
+    """The committed normalized inputs of a public-data session, parsed exactly as the engine parsed them."""
+    out: list[RawEvent] = []
+    for seq, line in store.payloads():
+        try:
+            ev = parse_event(json.loads(line, parse_float=Decimal))
+            out.append(RawEvent(seq, ev, None, ev.event_id, type(ev).__name__, ev.recv_us, line))
+        except (InputError, ValueError) as exc:
+            out.append(RawEvent(seq, None, f"malformed_event: {exc}", f"seq:{seq}", "unknown", None, line))
+    return out
+
+
+def _check_payloads(store: Storage, state: EngineState) -> list[str]:
+    n, lo, hi = store.conn.execute("SELECT count(*), coalesce(min(seq), 0), coalesce(max(seq), 0) "
+                                   "FROM input_payloads").fetchone()
+    if n != state.cursor or hi != state.cursor or (n and lo != 1):
+        return [f"input_payloads has {n} rows ({lo}..{hi}); cursor is {state.cursor}"]
+    return []
 
 
 def _check_inputs(c, state: EngineState, events: list[RawEvent]) -> list[str]:

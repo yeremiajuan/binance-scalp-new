@@ -1,0 +1,71 @@
+# PAPER forward runner on PUBLIC Binance spot market data (Phase 2). No credentials exist or can be set.
+# Every value is an unvalidated hypothesis. Changing any economic value (including [forward] normalization
+# settings) is a new configuration version and needs a new state path / account.
+
+[run]
+mode = "paper"                 # the only mode
+account_id = "paper-forward-1" # one process per account id (profile lock)
+symbol = "BTCUSDT"
+strategy = "B20-T5-v1"
+
+[account]
+starting_usdt = "1000"
+starting_btc = "0"
+
+[fees]
+buy_fee_bps = "10"             # provisional effective taker assumption, NOT a verified account rate
+sell_fee_bps = "10"
+buy_fee_asset = "BTC"
+
+[execution]
+slippage_bps = "1"
+latency_ms = 250
+quote_max_age_ms = 2000
+candle_max_lateness_ms = 5000
+signal_expiry_ms = 5000
+max_spread_bps = "5"
+max_entry_drift_atr = "0.25"
+buy_limit_cushion_bps = "5"
+sell_limit_cushion_bps = "50"
+participation_fraction = "0.10"
+reference_max_age_ms = 120000
+
+[risk]
+max_exposure_fraction = "0.20"
+risk_per_entry_fraction = "0.001"
+daily_loss_fraction = "0.01"
+drawdown_fraction = "0.03"
+day_timezone = "Asia/Jakarta"
+
+[forward]
+rest_host = "api.binance.com"          # allowlist: api*.binance.com, api-gcp.binance.com, data-api.binance.vision
+                                       # (data-api lacks executionRules/referencePrice -> entries stay blocked)
+ws_host = "data-stream.binance.vision" # or "stream.binance.com"; market data only
+quote_sample_ms = 1000                 # forward a real quote at least this often (never repeated/synthesized)
+heartbeat_ms = 1000                    # local ticks detect staleness/missing bars without any message
+metadata_refresh_s = 3600              # exchangeInfo + executionRules refresh
+metadata_max_age_s = 5400              # older metadata blocks entries
+reference_refresh_s = 30               # REST avgPrice/referencePrice poll (streams also deliver them)
+warmup_bars = 300                      # REST 1m warm-up at start (>= 260)
+backfill_timeout_s = 30
+reconnect_initial_ms = 1000
+reconnect_max_ms = 60000
+ws_silence_s = 30                      # reconnect an open but silent stream
+clock_check_s = 300                    # GET /api/v3/time; |offset| above the limit blocks entries
+clock_max_offset_ms = 1000
+rest_timeout_s = 10
+rest_weight_fraction = "0.5"           # stay below half of REQUEST_WEIGHT per minute
+daily_summary_local = "00:05"          # Asia/Jakarta (Telegram only)
+recordings_dir = "../state/recordings" # raw observations (relative to this file)
+profile_lock_dir = "~/.local/state/paperbot/locks"
+
+# Optional monitoring. Disabled by default. The bot token is read from the environment variable named here
+# and is never written to config, database, recordings or logs. Commands are read-only (/status, /positions).
+# [telegram]
+# enabled = true
+# env_var = "PAPERBOT_TELEGRAM_BOT"
+# chat_ids = ["123456789"]
+# max_attempts = 5
+# retention_days = 7
+# delayed_after_s = 60
+# poll_commands = true

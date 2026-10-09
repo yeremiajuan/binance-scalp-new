@@ -26,6 +26,76 @@ SUPPORTED_BUY_FEE_ASSETS = ("BTC", "USDT")
 FORBIDDEN_KEY_FRAGMENTS = ("key", "secret", "token", "password", "credential", "signer", "endpoint", "url")
 
 
+# Optional sections: key -> (kind, default). Path-like keys and monitoring settings are excluded from the
+# canonical (economic) configuration, so they never change the configuration identity.
+_FORWARD = {
+    "rest_host": ("str", "default"),  # resolved against paperbot_net.hosts (public market-data hosts only)
+    "ws_host": ("str", "default"),
+    "quote_sample_ms": ("int", 1000),
+    "heartbeat_ms": ("int", 1000),
+    "metadata_refresh_s": ("int", 3600),
+    "metadata_max_age_s": ("int", 5400),
+    "reference_refresh_s": ("int", 30),
+    "warmup_bars": ("int", 300),
+    "backfill_timeout_s": ("int", 30),
+    "reconnect_initial_ms": ("int", 1000),
+    "reconnect_max_ms": ("int", 60000),
+    "ws_silence_s": ("int", 30),
+    "clock_check_s": ("int", 300),
+    "clock_max_offset_ms": ("int", 1000),
+    "rest_timeout_s": ("int", 10),
+    "rest_weight_fraction": ("dec", "0.5"),
+    "daily_summary_local": ("str", "00:05"),
+    "recordings_dir": ("path", "recordings"),
+    "profile_lock_dir": ("path", "~/.local/state/paperbot/locks"),
+}
+_TELEGRAM = {
+    "enabled": ("bool", False),
+    "env_var": ("str", "PAPERBOT_TELEGRAM_BOT"),
+    "chat_ids": ("list_str", []),
+    "max_attempts": ("int", 5),
+    "retention_days": ("int", 7),
+    "delayed_after_s": ("int", 60),
+    "poll_commands": ("bool", True),
+}
+_OPTIONAL = {"forward": _FORWARD, "telegram": _TELEGRAM}
+
+
+@dataclass(frozen=True)
+class ForwardSettings:
+    rest_host: str
+    ws_host: str
+    quote_sample_ms: int
+    heartbeat_ms: int
+    metadata_refresh_s: int
+    metadata_max_age_s: int
+    reference_refresh_s: int
+    warmup_bars: int
+    backfill_timeout_s: int
+    reconnect_initial_ms: int
+    reconnect_max_ms: int
+    ws_silence_s: int
+    clock_check_s: int
+    clock_max_offset_ms: int
+    rest_timeout_s: int
+    rest_weight_fraction: Decimal
+    daily_summary_local: str
+    recordings_dir: str
+    profile_lock_dir: str
+
+
+
+@dataclass(frozen=True)
+class TelegramSettings:
+    enabled: bool
+    env_var: str
+    chat_ids: tuple[str, ...]
+    max_attempts: int
+    retention_days: int
+    delayed_after_s: int
+    poll_commands: bool
+
+
 class ConfigError(ValueError):
     pass
 
@@ -105,6 +175,16 @@ class Config:
     day_timezone: str
     metadata_path: str
     canonical: str  # canonical JSON of the economic configuration (excludes file paths)
+    forward: ForwardSettings | None = None
+    telegram: TelegramSettings | None = None
+
+    @property
+    def metadata_max_age_us(self) -> int | None:
+        return None if self.forward is None else self.forward.metadata_max_age_s * 1_000_000
+
+    @property
+    def clock_max_offset_us(self) -> int | None:
+        return None if self.forward is None else self.forward.clock_max_offset_ms * 1000
 
     @property
     def sha256(self) -> str:
@@ -147,12 +227,15 @@ def parse_config(data: dict, base_dir: Path | None = None) -> Config:
     if not isinstance(data, dict):
         raise ConfigError("configuration must be a table")
     _check_forbidden(data)
-    unknown = set(data) - set(_SCHEMA)
+    unknown = set(data) - set(_SCHEMA) - set(_OPTIONAL)
     if unknown:
         raise ConfigError(f"unknown configuration sections: {sorted(unknown)}")
     values: dict[str, dict[str, object]] = {}
+    optional = _parse_optional(data, base_dir)
     for section, keys in _SCHEMA.items():
         table = data.get(section)
+        if section == "metadata" and table is None and "forward" in optional:
+            table = {"path": "<forward: metadata is fetched from the public REST API>"}
         if not isinstance(table, dict):
             raise ConfigError(f"missing [{section}] table")
         extra = set(table) - set(keys)
@@ -232,7 +315,17 @@ def parse_config(data: dict, base_dir: Path | None = None) -> Config:
     }
     canonical_obj["run"]["mode"] = "paper"
     canonical_obj["fees"]["buy_fee_asset"] = asset
+    if "forward" in optional:
+        canonical_obj["forward"] = {k: (dtext(v) if isinstance(v, Decimal) else v)
+                                    for k, v in sorted(optional["forward"].items())
+                                    if _FORWARD[k][0] != "path"}
     canonical = json.dumps(canonical_obj, sort_keys=True, separators=(",", ":"))
+    forward = ForwardSettings(**optional["forward"]) if "forward" in optional else None
+    telegram = None
+    if "telegram" in optional:
+        t = dict(optional["telegram"])
+        t["chat_ids"] = tuple(t["chat_ids"])
+        telegram = TelegramSettings(**t)
 
     return Config(
         account_id=str(run["account_id"]),
@@ -261,7 +354,77 @@ def parse_config(data: dict, base_dir: Path | None = None) -> Config:
         day_timezone=str(risk["day_timezone"]),
         metadata_path=str(meta_path),
         canonical=canonical,
+        forward=forward,
+        telegram=telegram,
     )
+
+
+def _parse_optional(data: dict, base_dir: Path | None) -> dict[str, dict[str, object]]:
+    out: dict[str, dict[str, object]] = {}
+    for section, schema in _OPTIONAL.items():
+        if section not in data:
+            continue
+        table = data[section]
+        if not isinstance(table, dict):
+            raise ConfigError(f"[{section}] must be a table")
+        extra = set(table) - set(schema)
+        if extra:
+            raise ConfigError(f"[{section}] unknown keys: {sorted(extra)}")
+        vals: dict[str, object] = {}
+        for key, (kind, default) in schema.items():
+            raw = table.get(key, default)
+            field_name = f"{section}.{key}"
+            if kind == "bool":
+                if not isinstance(raw, bool):
+                    raise ConfigError(f"{field_name}: expected boolean")
+                vals[key] = raw
+            elif kind == "list_str":
+                if not isinstance(raw, list) or not all(isinstance(x, str | int) and not isinstance(x, bool)
+                                                        for x in raw):
+                    raise ConfigError(f"{field_name}: expected a list of chat ids")
+                vals[key] = [str(x) for x in raw]
+            elif kind == "path":
+                if not isinstance(raw, str) or not raw:
+                    raise ConfigError(f"{field_name}: expected a path string")
+                pth = Path(raw).expanduser()
+                if base_dir is not None and not pth.is_absolute():
+                    pth = base_dir / pth
+                vals[key] = str(pth)
+            else:
+                vals[key] = _parse_value(kind, raw, field_name)
+        out[section] = vals
+    fwd = out.get("forward")
+    if fwd is not None:
+        from paperbot_net.hosts import REST_HOSTS, WS_HOSTS  # the network package owns the host allowlist
+
+        if fwd["rest_host"] == "default":
+            fwd["rest_host"] = REST_HOSTS[0]
+        if fwd["ws_host"] == "default":
+            fwd["ws_host"] = next(iter(WS_HOSTS))
+        if fwd["rest_host"] not in REST_HOSTS:
+            raise ConfigError(f"forward.rest_host must be one of {REST_HOSTS} (public market data only)")
+        if fwd["ws_host"] not in WS_HOSTS:
+            raise ConfigError(f"forward.ws_host must be one of {sorted(WS_HOSTS)} (public market data only)")
+        for k in ("quote_sample_ms", "heartbeat_ms", "metadata_refresh_s", "metadata_max_age_s",
+                  "reference_refresh_s", "backfill_timeout_s", "reconnect_initial_ms", "reconnect_max_ms",
+                  "ws_silence_s", "clock_check_s", "clock_max_offset_ms", "rest_timeout_s"):
+            if int(fwd[k]) <= 0:
+                raise ConfigError(f"forward.{k} must be > 0")
+        if not 260 <= int(fwd["warmup_bars"]) <= 1000:
+            raise ConfigError("forward.warmup_bars must be in [260, 1000] (250-bar warm-up + lookback; REST max 1000)")
+        if fwd["metadata_max_age_s"] <= fwd["metadata_refresh_s"]:
+            raise ConfigError("forward.metadata_max_age_s must exceed metadata_refresh_s")
+        if not (0 < fwd["rest_weight_fraction"] <= 1):
+            raise ConfigError("forward.rest_weight_fraction must be in (0, 1]")
+        if fwd["heartbeat_ms"] > 1000 or fwd["quote_sample_ms"] > 1000:
+            raise ConfigError("forward.heartbeat_ms and quote_sample_ms must be <= 1000 (2 s freshness limit)")
+        hh, _, mm = str(fwd["daily_summary_local"]).partition(":")
+        if not (hh.isdigit() and mm.isdigit() and int(hh) < 24 and int(mm) < 60):
+            raise ConfigError("forward.daily_summary_local must be HH:MM")
+    tg = out.get("telegram")
+    if tg is not None and tg["enabled"] and not tg["chat_ids"]:
+        raise ConfigError("telegram.enabled requires an allowlist in telegram.chat_ids")
+    return out
 
 
 def load_config(path: str | Path) -> Config:
@@ -276,7 +439,8 @@ def load_config(path: str | Path) -> Config:
 def config_from_canonical(canonical: str, metadata_path: str = "<stored>") -> Config:
     """Rebuild the Config stored in a state database (identity is the canonical JSON)."""
     data = json.loads(canonical)
-    data["metadata"] = {"path": metadata_path}
+    if "forward" not in data:
+        data["metadata"] = {"path": metadata_path}
     cfg = parse_config(data)
     if cfg.canonical != canonical:
         raise ConfigError("stored configuration does not round-trip to the same canonical form")

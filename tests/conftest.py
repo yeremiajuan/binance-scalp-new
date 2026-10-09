@@ -117,3 +117,23 @@ def D(x) -> Decimal:
 @pytest.fixture
 def cfg_path(tmp_path: Path) -> Path:
     return write_config(tmp_path)
+
+
+def write_forward_config(directory: Path, overrides: dict | None = None, forward: dict | None = None,
+                         telegram: dict | None = None, name: str = "forward.toml") -> Path:
+    """A PAPER forward-runner configuration (public market data) for mocked/offline tests."""
+    base = write_config(directory, overrides, name=name)
+    fwd = {"recordings_dir": str(directory / "recordings"), "profile_lock_dir": str(directory / "locks"),
+           **(forward or {})}
+    text = base.read_text()
+    text += "[forward]\n" + "".join(f"{k} = {_toml_value(v)}\n" for k, v in fwd.items())
+    if telegram:
+        text += "[telegram]\n" + "".join(
+            f"{k} = {json.dumps(v) if isinstance(v, list) else _toml_value(v)}\n" for k, v in telegram.items())
+    base.write_text(text)
+    return base
+
+
+@pytest.fixture
+def fwd_cfg(tmp_path: Path) -> Path:
+    return write_forward_config(tmp_path)

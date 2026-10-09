@@ -33,7 +33,12 @@ from pathlib import Path
 
 from .money import ZERO, dtext, exact, is_multiple, to_dec
 
-LABELS = ("SYNTHETIC", "PUBLIC_SNAPSHOT")
+LABELS = ("SYNTHETIC", "PUBLIC_SNAPSHOT", "PUBLIC")
+# Reference used by PERCENT_PRICE filters (Binance filters.md, 2026): the symbol's reference price when it is
+# non-null, otherwise the volume-weighted average price over avgPriceMins. Phase 1 SYNTHETIC fixtures predate the
+# reference price and use the average only ("avg_price"); PUBLIC bundles use "reference_or_avg".
+REFERENCE_MODES = ("avg_price", "reference_or_avg")
+KNOWN_EXECUTION_RULES = ("PRICE_RANGE",)
 
 INAPPLICABLE = {
     "MARKET_LOT_SIZE": "applies to MARKET orders; Phase 1 submits LIMIT IOC only",
@@ -89,6 +94,9 @@ class SymbolRules:
     filters: tuple[tuple[str, dict], ...]  # (filterType, parsed fields)
     sha256: str
     raw_json: str
+    execution_rules: tuple[dict, ...] = ()  # this symbol's /api/v3/executionRules entries
+    reference_mode: str = "avg_price"
+    fetched_us: int | None = None
 
     def filter(self, ftype: str) -> dict | None:
         for t, f in self.filters:
@@ -164,6 +172,21 @@ def parse_metadata(text: str) -> SymbolRules:
     retrieved = data.get("retrieved_at")
     if not isinstance(retrieved, str) or not retrieved:
         raise MetadataError("metadata must be dated: missing retrieved_at")
+    reference_mode = data.get("reference_mode", "avg_price")
+    if reference_mode not in REFERENCE_MODES:
+        raise MetadataError(f"reference_mode must be one of {REFERENCE_MODES}")
+    exec_rules = data.get("execution_rules", [] if label != "PUBLIC" else None)
+    if label == "PUBLIC":
+        if not isinstance(exec_rules, list):
+            raise MetadataError("PUBLIC metadata must include the symbol's execution_rules (possibly empty)")
+        if reference_mode != "reference_or_avg":
+            raise MetadataError("PUBLIC metadata must use reference_mode='reference_or_avg'")
+    if not isinstance(exec_rules, list) or not all(isinstance(r, dict) for r in exec_rules):
+        raise MetadataError("execution_rules must be a list of rule objects")
+    for rule in exec_rules:
+        for k, v in rule.items():
+            if k != "ruleType" and v is not None:
+                rule[k] = to_dec(v, f"executionRules.{k}")
     sym = data.get("symbol")
     if not isinstance(sym, dict):
         raise MetadataError("metadata.symbol must be an object")
@@ -187,6 +210,8 @@ def parse_metadata(text: str) -> SymbolRules:
         filters=filters,
         sha256=hashlib.sha256(text.encode()).hexdigest(),
         raw_json=text,
+        execution_rules=tuple(exec_rules),
+        reference_mode=reference_mode,
     )
 
 
@@ -202,6 +227,7 @@ class Reference:
     mins: int
     recv_us: int
     event_id: str
+    kind: str = "avg_price"  # or "reference_price" (the exchange reference price, which has no window)
 
 
 @dataclass(frozen=True)
@@ -309,14 +335,15 @@ def validate_limit_order(
             if reference is None:
                 add(ftype, "reference", False, f"required {mins}-minute weighted average price unavailable")
                 continue
-            if reference.mins != mins:
+            if reference.kind == "avg_price" and reference.mins != mins:
                 add(ftype, "reference", False, f"reference window {reference.mins}m != required {mins}m")
                 continue
             age = now_us - reference.recv_us
             if age < 0 or age > reference_max_age_us:
                 add(ftype, "reference", False, f"reference age {age}us outside [0, {reference_max_age_us}]")
                 continue
-            add(ftype, "reference", True, f"avgPrice={dtext(reference.avg_price)} ({mins}m)")
+            add(ftype, "reference", True, f"{reference.kind}={dtext(reference.avg_price)}"
+                                       + (f" ({mins}m)" if reference.kind == "avg_price" else ""))
             ref = reference.avg_price
             _bound(checks, ftype, "multiplierUp", up, price <= ref * up, f"{dtext(price)} <= {dtext(ref * up)}")
             _bound(checks, ftype, "multiplierDown", down, price >= ref * down,
@@ -342,3 +369,28 @@ def _bound(checks: list[Check], ftype: str, rule: str, limit: Decimal, ok: bool,
         checks.append(Check(ftype, rule, "disabled", f"{rule}=0 disables this rule"))
     else:
         checks.append(Check(ftype, rule, "pass" if ok else "fail", detail))
+
+
+def execution_rule_violation(rules: SymbolRules, side: str, price: Decimal, reference_price: Decimal | None,
+                             reference_known: bool) -> str | None:
+    """Binance execution rules (faqs/price_range_execution_rules.md) for a taker execution at ``price``.
+
+    PRICE_RANGE: a taker trade may only execute within [ref*multDown, ref*multUp] for its side; it is not
+    enforced when the reference price is null or a multiplier is absent. Unknown rule types, or an unknown
+    reference while a PRICE_RANGE rule exists, return a blocking reason (never assumed to pass).
+    """
+    for rule in rules.execution_rules:
+        rtype = rule.get("ruleType")
+        if rtype not in KNOWN_EXECUTION_RULES:
+            return f"execution_rule_unknown:{rtype}"
+        if not reference_known:
+            return "execution_reference_unavailable"
+        if reference_price is None:
+            continue
+        up, down = ((rule.get("bidLimitMultUp"), rule.get("bidLimitMultDown")) if side == "BUY"
+                    else (rule.get("askLimitMultUp"), rule.get("askLimitMultDown")))
+        if up is not None and price > reference_price * up:
+            return "execution_rule_price_range"
+        if down is not None and price < reference_price * down:
+            return "execution_rule_price_range"
+    return None

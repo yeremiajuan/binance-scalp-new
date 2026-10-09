@@ -64,10 +64,16 @@ def load(tp: object, data: object) -> object:
         if not isinstance(data, dict):
             raise ValueError(f"expected object for {tp.__name__}")
         hints = typing.get_type_hints(tp)
-        names = [f.name for f in dataclasses.fields(tp)]
-        if set(data) != set(names):
-            raise ValueError(f"{tp.__name__}: field mismatch {sorted(set(data) ^ set(names))}")
-        return tp(**{n: load(hints[n], data[n]) for n in names})
+        fields = dataclasses.fields(tp)
+        names = [f.name for f in fields]
+        unknown = set(data) - set(names)
+        # A field may be absent only when it has a default: snapshots written before that field existed
+        # (e.g. Phase 1 state read by Phase 2 code) load with the default; nothing unknown is ever accepted.
+        missing = {f.name for f in fields if f.name not in data and f.default is dataclasses.MISSING
+                   and f.default_factory is dataclasses.MISSING}
+        if unknown or missing:
+            raise ValueError(f"{tp.__name__}: field mismatch {sorted(unknown | missing)}")
+        return tp(**{n: load(hints[n], data[n]) for n in names if n in data})
     raise TypeError(f"unsupported type {tp!r}")
 
 

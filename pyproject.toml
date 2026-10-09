@@ -4,13 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paperbot"
-version = "0.1.0"
-description = "Offline, deterministic PAPER core for a Binance spot BTCUSDT paper bot (Phase 1, synthetic replay only)."
+version = "0.2.0"
+description = "PAPER-only Binance spot BTCUSDT paper bot: offline synthetic core (Phase 1) and a public-market-data forward runner (Phase 2). No live trading."
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "websockets>=13,<16",  # public market streams (sync client); the only runtime dependency
+]
 
 [project.optional-dependencies]
-test = ["pytest>=8"]
+test = ["pytest>=8", "ruff>=0.6", "build>=1"]
 
 [project.scripts]
 paperbot = "paperbot.cli:main"

@@ -17,13 +17,23 @@ from collections import Counter
 from decimal import Decimal
 
 from .config import config_from_canonical
-from .constraints import parse_metadata
 from .money import ZERO, dtext, exact
-from .reconcile import reconcile
+from .reconcile import active_rules, reconcile
 from .risk import value
 from .storage import Storage
 from .timeutil import iso, local_iso
 
+LABELS = {
+    "SYNTHETIC": ["PAPER", "SYNTHETIC"],
+    "PUBLIC": ["PAPER", "PUBLIC DATA", "FORWARD"],
+    "PUBLIC_RECORDED_REPLAY": ["PAPER", "PUBLIC DATA", "RECORDED REPLAY"],
+}
+PUBLIC_DISCLAIMER = (
+    "PAPER | PUBLIC DATA: simulated paper fills against recorded public Binance best bid/ask observations. No order "
+    "was sent to any exchange. Simulated fills (including fill-time resizing) are not achievable real executions: "
+    "no matching engine, queue position, hidden liquidity or production fill guarantee is modeled. Live trading is "
+    "not implemented. Results are not evidence of a trading edge."
+)
 DISCLAIMER = (
     "PAPER | SYNTHETIC: simulated fills on synthetic fixtures. Engineering evidence only; not a backtest, not a "
     "forward trial and not evidence of a trading edge. No matching engine, queue position, hidden liquidity or "
@@ -56,16 +66,24 @@ def _build_report(store: Storage) -> dict:
     meta = store.meta()
     state = store.load_state()
     cfg = config_from_canonical(meta["config_canonical"])
-    rules = parse_metadata(meta["metadata_json"])
+    rules = active_rules(store, state, meta)
     tz = cfg.day_timezone
     problems = reconcile(store, state)
+    evidence = meta.get("evidence", "SYNTHETIC")
+    provenance = meta.get("data_provenance", "BINANCE_PUBLIC" if evidence != "SYNTHETIC" else "SYNTHETIC")
+    labels = list(LABELS.get(evidence, ["PAPER", evidence]))
+    disclaimer = DISCLAIMER if evidence == "SYNTHETIC" else PUBLIC_DISCLAIMER
+    if evidence != "SYNTHETIC" and provenance != "BINANCE_PUBLIC":
+        labels.append("MOCKED")
+        disclaimer = ("MOCKED: public-format test data from fake servers/transports, not real market "
+                      "observations. " + disclaimer)
 
     b, pool = state.balances, state.pool
     q = state.last_quote
     quote_age = None if q is None or state.clock_us is None else state.clock_us - q.recv_us
     fresh = q is not None and state.health.quotes_fresh and quote_age <= cfg.quote_max_age_us
     val = value(b, pool, rules, q.bid, slippage=cfg.slippage, sell_fee=cfg.sell_fee,
-                sell_cushion=cfg.sell_limit_cushion) if q is not None else None
+                sell_cushion=cfg.sell_limit_cushion) if q is not None and rules is not None else None
 
     fills = _rows(store, "SELECT * FROM fills ORDER BY seq")
     sells = [f for f in fills if f["side"] == "SELL"]
@@ -122,8 +140,11 @@ def _build_report(store: Storage) -> dict:
         return {"utc": iso(us), "local": local_iso(us, tz)} if us is not None else None
 
     return {
-        "labels": ["PAPER", "SYNTHETIC"],
-        "disclaimer": DISCLAIMER,
+        "labels": labels,
+        "evidence": evidence,
+        "data_provenance": provenance,
+        "disclaimer": disclaimer,
+        "forward": _forward_section(store, state, cfg, rules, health, ts) if evidence != "SYNTHETIC" else None,
         "provenance": {
             "account_id": meta["account_id"], "symbol": meta["symbol"], "strategy": meta["strategy"],
             "schema_version": meta["schema_version"], "config_sha256": meta["config_sha256"],
@@ -222,12 +243,13 @@ def _f(x) -> str:
 def render_status(r: dict) -> str:
     pv, m, p, inv = r["provenance"], r["mark"], r["pnl"], r["inventory"]
     lines = [
-        f"PAPER | SYNTHETIC | {pv['symbol']} | {pv['strategy']} | account {pv['account_id']}",
+        f"{' | '.join(r['labels'])} | {pv['symbol']} | {pv['strategy']} | account {pv['account_id']}",
         f"cursor {r['cursor']['seq']}/{pv['input_events']} · clock "
         f"{r['cursor']['clock']['utc'] if r['cursor']['clock'] else '-'}"
         f" · reconciliation {'OK' if r['reconciliation']['ok'] else 'FAILED'}",
         f"config {pv['config_sha256'][:16]} · input {pv['input_sha256'][:16]} · metadata {pv['metadata_label']} "
-        f"{pv['metadata_sha256'][:16]} (retrieved {pv['metadata_retrieved_at']})",
+        f"{pv['metadata_sha256'][:16]} (retrieved {pv['metadata_retrieved_at']})" if not r.get("forward") else
+        f"config {pv['config_sha256'][:16]} · input {pv['input_sha256'][:16]} · metadata {pv['metadata_label']}",
         f"cash {_f(r['balances']['USDT']['free'])} free + {_f(r['balances']['USDT']['locked'])} locked USDT · "
         f"BTC {_f(inv['btc_total'])} (sellable {_f(inv['sellable_btc'])}, dust {_f(inv['dust_btc'])})",
         f"mark bid {_f(m['bid'])} age {_f(m['age_us'])}us {'fresh' if m['fresh'] else 'STALE/UNCERTAIN'} · "
@@ -236,9 +258,78 @@ def render_status(r: dict) -> str:
         f" · fees {_f(p['fees_usdt_value'])} USDT value",
         f"latches {r['risk']['latches'] or 'none'}",
     ]
+    fw = r.get("forward")
+    if fw:
+        lines += [
+            f"feed: stream {fw['stream']} · quotes {'fresh' if fw['quotes_fresh'] else 'STALE'} (mark age "
+            f"{_f(m['age_us'])}us) · last 1m bar {fw['last_bar_start'] or '-'} · candle missing {fw['candle_missing']}",
+            f"entry blocks: {', '.join(fw['blocks']) or 'none'} · recovery signaled {fw['recovery_signaled']} · "
+            f"metadata {fw['metadata_sha256'][:12] if fw['metadata_sha256'] else 'NONE'} age {fw['metadata_age_s']}s",
+            f"queued exit: {fw['queued_exit'] or 'none'} · pending order: {fw['pending_order'] or 'none'} · "
+            f"unprotected exposure (cumulative) {fw['unprotected_total_s']}s · outbox {fw['outbox'] or '{}'}",
+        ]
     for u in r["unresolved_risk"]:
         lines.append(f"UNRESOLVED: {u}")
     return "\n".join(lines)
+
+
+def render_positions(r: dict) -> str:
+    inv, m = r["inventory"], r["mark"]
+    clock = r["cursor"]["clock"]["utc"] if r["cursor"]["clock"] else "-"
+    out = [f"{' | '.join(r['labels'])} | positions | clock {clock}"]
+    open_pos = [p for p in r["positions"] if p["status"] == "open"]
+    for p in open_pos or []:
+        out.append(f"OPEN {p['position_id'].split('|')[-2]} entry {p['entry_price']} qty {p['entry_qty']} "
+                   f"stop {p['stop_price']} target {p['target_price']} opened {p['opened_us']}")
+    if not open_pos:
+        out.append("no open position")
+    fw = r.get("forward") or {}
+    out.append(f"queued exit: {fw.get('queued_exit') or 'none'} · pending order: {fw.get('pending_order') or 'none'}")
+    out.append(f"inventory {_f(inv['btc_total'])} BTC (sellable {_f(inv['sellable_btc'])}, dust {_f(inv['dust_btc'])}, "
+               f"dust basis {_f(inv['dust_basis_usdt'])}) · bid {_f(m['bid'])} age {_f(m['age_us'])}us "
+               f"{'fresh' if m['fresh'] else 'STALE/UNCERTAIN'} · liquidation value {_f(m['liquidation_value'])}")
+    for u in r["unresolved_risk"]:
+        out.append(f"UNRESOLVED: {u}")
+    return "\n".join(out)
+
+
+def _forward_section(store: Storage, state, cfg, rules, health_rows: list[dict], ts) -> dict:
+    last_ws = [h for h in health_rows if h["kind"] in ("feed_ws_connected", "feed_ws_disconnected")]
+    stream = "unknown"
+    if last_ws:
+        stream = "connected" if last_ws[-1]["kind"] == "feed_ws_connected" else "DISCONNECTED"
+    pos = state.position
+    intent = pos.exit_intent if pos is not None else None
+    sessions = _rows(store, "SELECT * FROM sessions ORDER BY started_wall") if store.has_table("sessions") else []
+    outbox = dict(Counter(r["status"] for r in _rows(store, "SELECT status FROM outbox"))) \
+        if store.has_table("outbox") else {}
+    now = state.clock_us
+    return {
+        "stream": stream,
+        "quotes_fresh": state.health.quotes_fresh,
+        "candle_missing": state.health.candle_missing,
+        "last_bar_start": iso(state.strategy.last_start_us),
+        "warm_five_minute_bars": state.strategy.five_count,
+        "blocks": list(state.health.blocks),
+        "recovery_signaled": state.health.recovery_signaled,
+        "metadata_sha256": state.metadata_hash,
+        "metadata_age_s": None if state.metadata_fetched_us is None or now is None
+        else (now - state.metadata_fetched_us) // 1_000_000,
+        "metadata_status": rules.status if rules is not None else None,
+        "execution_rules": [dict(r) for r in rules.execution_rules] if rules is not None else [],
+        "reference_price": None if state.ref_price is None else {
+            "value": state.ref_price.value, "received": ts(state.ref_price.recv_us)},
+        "queued_exit": None if intent is None else f"{intent.reason} (attempts {intent.attempts}, waiting: "
+                                                   f"{intent.blocked_reason or 'no'})",
+        "pending_order": None if state.order is None else f"{state.order.purpose} {state.order.side} "
+                                                           f"{state.order.qty} @ {state.order.limit_price}",
+        "unprotected_total_s": (state.health.unprotected_total_us
+                                + (now - state.health.unprotected_since_us if state.health.unprotected_since_us
+                                   else 0)) // 1_000_000,
+        "sessions": sessions,
+        "outbox": outbox,
+        "manifest": store.manifest(),
+    }
 
 
 def render_report(r: dict) -> str:

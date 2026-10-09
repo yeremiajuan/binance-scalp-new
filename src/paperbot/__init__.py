@@ -4,4 +4,4 @@ PAPER and SYNTHETIC only. There is no network client, credential, signer, order
 endpoint or live execution path in this package.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
