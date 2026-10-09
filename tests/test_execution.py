@@ -10,7 +10,7 @@ from conftest import D, report, rows, write_config
 from scenarios import BREAKOUT_LEVEL, MS, entry_scenario, follow_range, run
 
 from paperbot.money import ceil_to, floor_to
-from paperbot.synthetic import breakout_bar, range_bars, staircase, warm_scenario
+from paperbot.synthetic import breakout_bar, keepalive, range_bars, staircase, warm_scenario
 
 TICK = D("0.01")
 
@@ -127,7 +127,7 @@ def test_partial_entry_cancels_remainder_and_never_retries(tmp_path, cfg_path):
     o = entry_order(db)
     (f,) = rows(db, "SELECT * FROM fills WHERE side = 'BUY'")
     assert D(o["qty"]) > D("0.002") and D(f["qty"]) == D("0.002")
-    assert o["status"] == "partial" and o["outcome_reason"] == "ioc_remainder_canceled"
+    assert o["status"] == "partial" and o["outcome_reason"] == "ioc_remainder_canceled;fill_cap=visible_liquidity"
     assert len(rows(db, "SELECT * FROM orders WHERE side = 'BUY'")) == 1  # no retry of the remainder
     (pos,) = rows(db, "SELECT * FROM positions")
     assert D(pos["entry_qty"]) == D("0.002") * D("0.999")  # base-asset fee reduces acquired BTC
@@ -150,7 +150,7 @@ def test_candle_touch_without_executable_quote_never_fills(tmp_path, cfg_path):
     # Next candle's low pierces the stop (~61303) but every executable bid stays above it.
     deep = range_bars(bb.end_us, 1, BREAKOUT_LEVEL, bb.close)[0]
     deep.low = D(61000)
-    sc.mid_quote(bb.end_us + 30_000 * MS, 61450)
+    keepalive(sc, bb.end_us + 900 * MS, deep.end_us + 200 * MS, 61450)  # fresh bids, all above the stop
     sc.mid_quote(deep.end_us + 200 * MS, 61480)
     sc.candle(deep)
     db = run(tmp_path, sc, cfg_path)
@@ -171,7 +171,12 @@ def test_stale_quotes_preserve_inventory_and_gap_exit_fills_only_on_later_quotes
     (pos,) = rows(db, "SELECT * FROM positions")
     (sell,) = rows(db, "SELECT * FROM orders WHERE side = 'SELL'")
     (sf,) = rows(db, "SELECT * FROM fills WHERE side = 'SELL'")
-    assert pos["exit_reason"] == "stop"
+    (intent,) = rows(db, "SELECT * FROM exit_intents")
+    # the outage itself queues the exit (health beats stop in priority); the stop also triggered on recovery
+    assert pos["exit_reason"] == intent["reason"] == "health:quotes_stale"
+    assert json.loads(intent["detail"])["triggers"] == ["health:quotes_stale"]
+    assert intent["created_us"] == gap.end_us + 500 * MS  # queued at the first event after staleness began
+    assert D(sell["limit_price"]) < D(pos["stop_price"])  # executed on the first fresh quote, below the stop
     assert sell["submitted_us"] == gap.end_us + 1000 * MS and sf["fill_us"] == gap.end_us + 1500 * MS
     assert D(sf["price"]) == floor_to(D(60949) * D("0.9999"), TICK)
     assert D(sf["price"]) < D(pos["stop_price"])  # no fill at the stop price: overshoot is visible
@@ -186,6 +191,7 @@ def test_partial_exits_retry_with_new_orders_later_quotes_and_updated_limits(tmp
     sc, bb = entry_scenario()
     sc.mid_quote(bb.end_us + 900 * MS, 61502)
     t = bb.end_us + 30_000 * MS
+    keepalive(sc, bb.end_us + 900 * MS, t, 61502)
     sc.mid_quote(t, 62200, bid_qty="0.01")  # target hit -> exit order 1 submitted here
     quotes = [sc.mid_quote(t + k * 400 * MS, 62200 - 3 * k, bid_qty="0.01") for k in range(1, 6)]
     db = run(tmp_path, sc, cfg_path)
@@ -227,11 +233,13 @@ def test_quote_consumption_is_unique_in_storage(tmp_path, cfg_path):
 def test_timeout_exit_after_ten_minutes_from_first_fill(tmp_path, cfg_path):
     sc, bb = entry_scenario()
     sc.mid_quote(bb.end_us + 900 * MS, 61502)
-    follow_range(sc, bb, 12, BREAKOUT_LEVEL, offsets_ms=(200, 700))
+    follow_range(sc, bb, 12, BREAKOUT_LEVEL, offsets_ms=(200, 700), every_ms=1500)
     db = run(tmp_path, sc, cfg_path)
     (pos,) = rows(db, "SELECT * FROM positions")
     (intent,) = rows(db, "SELECT * FROM exit_intents")
     assert intent["reason"] == "timeout"
+    assert not [h for h in rows(db, "SELECT * FROM health_events") if h["kind"] == "quotes_stale"
+                and h["ts_us"] > pos["opened_us"]]
     assert intent["created_us"] - pos["opened_us"] >= 10 * 60 * 1_000_000
     assert intent["created_us"] - pos["opened_us"] < 11 * 60 * 1_000_000
     assert pos["status"] == "closed"
@@ -243,10 +251,13 @@ def test_trend_invalidation_exit_on_finalized_five_minute_close(tmp_path, cfg_pa
     # Contrived on purpose: candles close below the 5m EMA20 while executable bids stay above the stop,
     # isolating the finalized-5m invalidation rule from the quote-driven stop.
     drop = range_bars(bb.end_us, 4, 61100, bb.close)
+    prev = bb.end_us + 900 * MS
     for b in drop:
+        keepalive(sc, prev, b.end_us + 200 * MS, 61450)
         sc.mid_quote(b.end_us + 200 * MS, 61450)
         sc.candle(b)
         sc.mid_quote(b.end_us + 700 * MS, 61450)
+        prev = b.end_us + 700 * MS
     db = run(tmp_path, sc, cfg_path)
     (intent,) = rows(db, "SELECT * FROM exit_intents")
     assert intent["reason"] == "trend_invalidation"
@@ -351,6 +362,7 @@ def test_partial_fragment_below_min_notional_is_valid_and_leaves_unsellable_resi
     # 10% of 0.0007 visible = 0.00007 BTC (~4.3 USDT < 5 USDT minNotional): the *submitted* order passed the
     # minimum; the fragment is not re-validated as if it were a new order.
     sc.mid_quote(bb.end_us + 900 * MS, 61502, ask_qty="0.0007")
+    keepalive(sc, bb.end_us + 900 * MS, bb.end_us + 30_000 * MS, 61502)
     sc.mid_quote(bb.end_us + 30_000 * MS, 61000)  # stop trigger
     sc.mid_quote(bb.end_us + 30_400 * MS, 61000)
     db = run(tmp_path, sc, cfg_path)
@@ -367,3 +379,70 @@ def test_partial_fragment_below_min_notional_is_valid_and_leaves_unsellable_resi
     assert r["inventory"]["btc_total"] == D("0.00007") * D("0.999") == r["inventory"]["dust_btc"]
     assert r["inventory"]["basis_usdt"] == -D(f["usdt_delta"])  # retained with its basis, never deleted
     assert r["reconciliation"]["ok"] and r["pnl"]["identity"]["holds"]
+
+
+def test_fill_time_risk_cap_reduces_quantity_when_costs_widen(tmp_path, cfg_path):
+    sc, bb = entry_scenario()
+    # Spread widens from 2 to 28 (4.55 bps, still <= 5 bps) between decision and the fill observation:
+    # d + p*C grows, so the order's planned quantity would exceed the 0.1% risk budget at fill time.
+    fq = sc.quote(bb.end_us + 900 * MS, 61486, 61514)
+    db = run(tmp_path, sc, cfg_path)
+    o = entry_order(db)
+    (c,) = rows(db, "SELECT * FROM candidates WHERE status = 'submitted'")
+    (f,) = rows(db, "SELECT * FROM fills")
+    assert f["quote_event_id"] == fq["id"]
+    d = D(c["stop_distance"])
+    p, bid = D(61514), D(61486)
+    cost = D("0.001") + D("0.001") + (p - bid) / ((p + bid) / 2) + 2 * D("0.0001")
+    budget = D("0.001") * D(1000)  # equity at the fill observation: all cash (reservation counts as cash)
+    assert D(o["qty"]) * (d + p * cost) > budget  # the submitted size would breach the budget at fill time
+    assert D(f["qty"]) * (d + p * cost) <= budget  # the fill does not
+    assert D(f["qty"]) == floor_to(budget / (d + p * cost), D("0.00001")) < D(o["qty"])
+    assert o["status"] == "partial" and o["outcome_reason"] == "ioc_remainder_canceled;fill_cap=risk"
+    assert report(db)["reconciliation"]["ok"]
+
+
+def test_outage_queues_exit_even_when_recovery_is_inside_the_stop_target_range(tmp_path, cfg_path):
+    """Regression (review finding 1): fresh quotes after an outage that sit between stop and target must still
+    flatten the position. The exit is queued during the outage and executes only on fresh data after latency."""
+    sc, bb = entry_scenario()
+    sc.mid_quote(bb.end_us + 900 * MS, 61502)
+    keepalive(sc, bb.end_us + 900 * MS, bb.end_us + 10_000 * MS, 61502)
+    sc.heartbeat(bb.end_us + 40_000 * MS)  # ~31 s without quotes: stale while exposed, nothing to sell into
+    rec1 = sc.mid_quote(bb.end_us + 45_000 * MS, 61500)  # recovered, inside (stop, target)
+    rec2 = sc.mid_quote(bb.end_us + 45_400 * MS, 61499)
+    db = run(tmp_path, sc, cfg_path)
+    (pos,) = rows(db, "SELECT * FROM positions")
+    (intent,) = rows(db, "SELECT * FROM exit_intents")
+    (sell,) = rows(db, "SELECT * FROM orders WHERE side = 'SELL'")
+    (sf,) = rows(db, "SELECT * FROM fills WHERE side = 'SELL'")
+    assert D(pos["stop_price"]) < D(61499) and D(61500) < D(pos["target_price"])
+    assert intent["reason"] == "health:quotes_stale" and intent["created_us"] == bb.end_us + 40_000 * MS
+    waiting = [h for h in rows(db, "SELECT * FROM health_events WHERE kind = 'exit_waiting'")]
+    assert waiting and waiting[0]["ts_us"] == bb.end_us + 40_000 * MS  # queued, not filled, during the outage
+    assert sell["reference_quote_id"] == rec1["id"] and sell["submitted_us"] == bb.end_us + 45_000 * MS
+    assert sell["ready_us"] == bb.end_us + 45_250 * MS and sf["quote_event_id"] == rec2["id"]
+    assert pos["status"] == "closed" and pos["exit_reason"] == "health:quotes_stale"
+    assert report(db)["reconciliation"]["ok"]
+
+
+@pytest.mark.parametrize("cause", ["candle_late", "candle_missing"])
+def test_late_or_missing_candle_queues_exit_for_fresh_data(tmp_path, cfg_path, cause):
+    sc, bb = entry_scenario()
+    sc.mid_quote(bb.end_us + 900 * MS, 61502)
+    nxt = range_bars(bb.end_us, 1, BREAKOUT_LEVEL, bb.close)[0]
+    if cause == "candle_late":
+        keepalive(sc, bb.end_us + 900 * MS, nxt.end_us + 4_900 * MS, 61502)
+        sc.candle(nxt, recv_delay_ms=5_500)  # the expected bar, finalized 5.5 s after its end
+        t = nxt.end_us + 5_500 * MS
+    else:
+        keepalive(sc, bb.end_us + 900 * MS, nxt.end_us + 6_000 * MS, 61502)  # quotes fresh, bar never arrives
+        t = nxt.end_us + 6_000 * MS
+    sc.mid_quote(t + 100 * MS, 61502)
+    sc.mid_quote(t + 500 * MS, 61502)
+    db = run(tmp_path, sc, cfg_path)
+    (intent,) = rows(db, "SELECT * FROM exit_intents")
+    assert intent["reason"] == f"health:{cause}"
+    (sf,) = rows(db, "SELECT * FROM fills WHERE side = 'SELL'")
+    (sell,) = rows(db, "SELECT * FROM orders WHERE side = 'SELL'")
+    assert sf["quote_recv_us"] >= sell["ready_us"] == sell["submitted_us"] + 250 * MS

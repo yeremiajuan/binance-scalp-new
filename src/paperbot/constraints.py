@@ -8,7 +8,8 @@ filters or effective commissions.
 Validation rules (Binance spot filter semantics, LIMIT orders only):
 
 * Increments come from filters (tickSize, stepSize), never from asset
-  precision digit counts. A zero increment/limit disables that rule; no
+  precision digit counts: ``price % tickSize == 0`` and ``qty % stepSize == 0``
+  (absolute multiples, not offsets from minPrice/minQty). A zero increment/limit disables that rule; no
   division or modulo by zero is performed.
 * Orders are validated after rounding. Quantities are never rounded up to meet
   a minimum.
@@ -276,14 +277,14 @@ def validate_limit_order(
             mn, mx, tick = f["minPrice"], f["maxPrice"], f["tickSize"]
             _bound(checks, ftype, "minPrice", mn, price >= mn, f"{dtext(price)} >= {dtext(mn)}")
             _bound(checks, ftype, "maxPrice", mx, price <= mx, f"{dtext(price)} <= {dtext(mx)}")
-            _bound(checks, ftype, "tickSize", tick, is_multiple(price - mn, tick) if tick else True,
-                   f"({dtext(price)}-{dtext(mn)}) % {dtext(tick)} == 0")
+            _bound(checks, ftype, "tickSize", tick, is_multiple(price, tick),
+                   f"{dtext(price)} % {dtext(tick)} == 0")
         elif ftype == "LOT_SIZE":
             mn, mx, step = f["minQty"], f["maxQty"], f["stepSize"]
             _bound(checks, ftype, "minQty", mn, qty >= mn, f"{dtext(qty)} >= {dtext(mn)}")
             _bound(checks, ftype, "maxQty", mx, qty <= mx, f"{dtext(qty)} <= {dtext(mx)}")
-            _bound(checks, ftype, "stepSize", step, is_multiple(qty - mn, step) if step else True,
-                   f"({dtext(qty)}-{dtext(mn)}) % {dtext(step)} == 0")
+            _bound(checks, ftype, "stepSize", step, is_multiple(qty, step),
+                   f"{dtext(qty)} % {dtext(step)} == 0")
         elif ftype == "MIN_NOTIONAL":
             mn = f["minNotional"]
             _bound(checks, ftype, "minNotional", mn, notional >= mn,

@@ -136,14 +136,25 @@ def range_bars(start_us: int, n: int, level, prev_close) -> list[BarSpec]:
     return bars
 
 
+def keepalive(sc: Scenario, t_from_us: int, t_to_us: int, mid, *, every_ms: int = 1500, **kw) -> None:
+    """Fresh quotes at ``mid`` every ``every_ms`` in ``(t_from_us, t_to_us)``: continuous, unremarkable data."""
+    t = t_from_us + every_ms * US_PER_MS
+    while t < t_to_us:
+        sc.mid_quote(t, mid, **kw)
+        t += every_ms * US_PER_MS
+
+
 def emit_edge(sc: Scenario, bars: list[BarSpec], *, offsets_ms: tuple[int, ...] = (200,), qty="0.5",
-              reference: bool = False) -> None:
+              reference: bool = False, every_ms: int | None = None) -> None:
     """Each bar plus quotes at the bar's close, received ``offsets_ms`` after the bar end.
 
     The first quote precedes the candle's receipt (500 ms), so it is the fresh planning quote at decision time.
     Quotes received after the candle belong to the next minute's flow.
     """
     for b in bars:
+        if every_ms is not None:  # keep quotes fresh through the bar (at its close, which lies in [low, high])
+            keepalive(sc, b.start_us + max([o for o in offsets_ms if o >= 500], default=0) * US_PER_MS,
+                      b.end_us, b.close, every_ms=every_ms, bid_qty=qty, ask_qty=qty)
         early = [o for o in offsets_ms if o < 500]
         late = [o for o in offsets_ms if o >= 500]
         for o in early:

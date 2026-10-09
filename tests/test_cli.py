@@ -92,7 +92,7 @@ def test_replay_status_report_are_labeled_and_read_only(tmp_path, capsys):
                    "skip reasons", "ioc_remainder_canceled", "fees by native asset", "dust",
                    "UNRESOLVED", "exchange_time not supplied", "signal ", "submitted ", "ready ",
                    "identity starting+realized+unrealized = cash+liquidation", "-> True", "exit_reason=target",
-                   "exit_reason=stop", "not evidence of a trading edge"):
+                   "exit_reason=health:quotes_stale", "not evidence of a trading edge"):
         assert needle in out, needle
     js = json.loads(out[out.index("{\n"):])
     assert js["labels"] == ["PAPER", "SYNTHETIC"] and js["reconciliation"]["ok"]

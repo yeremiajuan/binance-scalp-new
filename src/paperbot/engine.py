@@ -59,7 +59,13 @@ from .strategy import (
 from .strategy import update as strategy_update
 from .timeutil import MINUTE_US, iso, local_date
 
-EXIT_PRIORITY = ("halt", "stop", "trend_invalidation", "target", "timeout")
+# Exit-trigger priority (PROJECT_PLAN.md): halt/health/stop, then trend invalidation, target, timeout.
+# Health triggers carry their cause, e.g. "health:quotes_stale".
+EXIT_PRIORITY = ("halt", "health", "stop", "trend_invalidation", "target", "timeout")
+
+
+def _priority(trigger: str) -> int:
+    return EXIT_PRIORITY.index(trigger.split(":", 1)[0])
 
 
 class EngineHalted(RuntimeError):
@@ -323,7 +329,7 @@ class Engine:
         st.clock_us = ev.recv_us
         rec.now = ev.recv_us
         triggers: list[str] = []
-        self._housekeeping(st, rec, triggers)
+        self._housekeeping(st, rec, triggers, ev)
         disposition, detail = "accepted", {}
         if isinstance(ev, CandleEvent):
             disposition, detail = self._on_candle(st, rec, ev, triggers)
@@ -338,7 +344,7 @@ class Engine:
 
     # ------------------------------------------------------------ housekeeping
 
-    def _housekeeping(self, st: EngineState, rec: Recorder, triggers: list[str]) -> None:
+    def _housekeeping(self, st: EngineState, rec: Recorder, triggers: list[str], ev) -> None:
         cfg, now = self.cfg, st.clock_us
         day = local_date(now, cfg.day_timezone)
         if st.risk.day != day:
@@ -360,9 +366,12 @@ class Engine:
             rec.health("quotes_stale", stale_since=iso(stale_at), last_quote=q.event_id, inventory_exposed=exposed)
             if st.order is not None and st.order.purpose == "entry":
                 self._close_order(st, rec, "canceled", "quote_stale", None)
+            triggers.append("health:quotes_stale")  # queue an exit; it executes only on fresh data + latency
 
         last = st.strategy.last_start_us
-        if last is not None and not st.health.candle_missing:
+        # The expected bar itself arriving past the deadline is "late" (handled in _on_candle), not "missing".
+        is_expected_bar = isinstance(ev, CandleEvent) and last is not None and ev.start_us == last + MINUTE_US
+        if last is not None and not st.health.candle_missing and not is_expected_bar:
             next_end = last + 2 * MINUTE_US
             if now > next_end + cfg.candle_max_lateness_us:
                 st.health.candle_missing = True
@@ -370,6 +379,7 @@ class Engine:
                            detected_at=iso(now))
                 if st.order is not None and st.order.purpose == "entry":
                     self._close_order(st, rec, "canceled", "candle_missing", None)
+                triggers.append("health:candle_missing")
 
         o = st.order
         if o is not None:
@@ -427,10 +437,12 @@ class Engine:
                        action="indicators reset; warm-up restarts; no forward fill")
             if st.order is not None and st.order.purpose == "entry":
                 self._close_order(st, rec, "canceled", "candle_gap", None)
+            triggers.append("health:candle_gap")
         if late:
             rec.health("candle_late", bar_start=iso(ev.start_us), lateness_ms=(ev.recv_us - end) // 1000)
             if st.order is not None and st.order.purpose == "entry":
                 self._close_order(st, rec, "canceled", "candle_late", None)
+            triggers.append("health:candle_late")
         five = res.new_five
         if five is not None and trend_invalidated(five):
             if st.order is not None and st.order.purpose == "entry":
@@ -636,16 +648,28 @@ class Engine:
             return self._close_order(st, rec, "canceled", "guard_failed_at_fill:" + guard, q)
         if price > o.limit_price:
             return self._close_order(st, rec, "zero", "price_protection", q)
-        qty = fill_quantity(o.qty, q.ask_qty, cfg.participation, rules.step)
+        # Fill-time caps, recomputed from this observation: the submitted quantity is never enlarged, and the
+        # fill never exceeds the modeled risk budget or exposure headroom at current equity, d + p*C.
+        v = self._value(st, q.bid)
+        credit_ratio = ONE - cfg.buy_fee if cfg.buy_fee_asset == "BTC" else ONE
+        caps = {
+            "order": o.qty,
+            "visible_liquidity": q.ask_qty * cfg.participation,
+            "risk": cfg.risk_per_entry * v.equity / gate.net_risk,
+            "exposure": max(ZERO, cfg.max_exposure * v.equity - v.btc_mark_value) / (q.bid * credit_ratio),
+        }
+        qty = floor_to(min(caps.values()), rules.step)
+        binding = min(caps, key=lambda k: caps[k])
         if qty <= 0:
-            return self._close_order(st, rec, "zero", "insufficient_visible_liquidity", q)
+            reason = "insufficient_visible_liquidity" if binding == "visible_liquidity" else f"fill_cap:{binding}"
+            return self._close_order(st, rec, "zero", reason, q)
         amounts = buy_amounts(qty, price, cfg.buy_fee, cfg.buy_fee_asset)
         if amounts.usdt_debit > o.reserved_amount:
             raise InvariantViolation("buy fill would exceed its reservation")
-        v = self._value(st, q.bid)
-        exposure_after = v.btc_mark_value + amounts.btc_credit * q.bid
-        if exposure_after > cfg.max_exposure * v.equity:
-            return self._close_order(st, rec, "canceled", "exposure_at_fill", q)
+        if qty * gate.net_risk > cfg.risk_per_entry * v.equity:
+            raise InvariantViolation("entry fill exceeds the modeled risk budget")
+        if v.btc_mark_value + amounts.btc_credit * q.bid > cfg.max_exposure * v.equity:
+            raise InvariantViolation("entry fill exceeds the exposure cap")
 
         position_id = o.candidate_id + "|pos"
         d = o.stop_distance
@@ -672,8 +696,8 @@ class Engine:
         o.position_id = position_id
         st.position = pos
         status = "filled" if qty == o.qty else "partial"
-        self._close_order(st, rec, status, None if status == "filled" else "ioc_remainder_canceled", q,
-                          filled_qty=qty, spent=amounts.usdt_debit)
+        reason = None if status == "filled" else f"ioc_remainder_canceled;fill_cap={binding}"
+        self._close_order(st, rec, status, reason, q, filled_qty=qty, spent=amounts.usdt_debit)
 
     def _fill_exit(self, st: EngineState, rec: Recorder, o: PendingOrder, q: QuoteObs) -> None:
         cfg, rules = self.cfg, self.rules
@@ -778,13 +802,13 @@ class Engine:
 
         pos = st.position
         if pos is not None and pos.exit_intent is None and triggers:
-            reason = min(triggers, key=EXIT_PRIORITY.index)
+            reason = min(triggers, key=_priority)
             intent = ExitIntent(pos.position_id + "|exit-intent", reason, st.clock_us, 0, None)
             pos.exit_intent = intent
             rec.insert("exit_intents", {
                 "intent_id": intent.intent_id, "position_id": pos.position_id, "reason": reason,
                 "created_us": st.clock_us, "status": "active", "attempts": 0, "closed_us": None,
-                "detail": {"triggers": sorted(set(triggers), key=EXIT_PRIORITY.index)},
+                "detail": {"triggers": sorted(set(triggers), key=_priority)},
             })
         if st.position is not None and st.position.exit_intent is not None and st.order is None:
             self._submit_exit(st, rec)

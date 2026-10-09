@@ -117,3 +117,22 @@ def test_metadata_must_be_dated_and_labeled():
     with pytest.raises(MetadataError):
         parse_metadata(json.dumps(meta))
     assert load_metadata(FULL_METADATA).label == "SYNTHETIC"
+
+
+def test_increments_are_absolute_multiples_not_offsets_from_minimums():
+    # minimums deliberately NOT multiples of their increments
+    meta = minimal_metadata()
+    meta["symbol"]["filters"][0] = {"filterType": "PRICE_FILTER", "minPrice": "0.005", "maxPrice": "1000000",
+                                    "tickSize": "0.01"}
+    meta["symbol"]["filters"][1] = {"filterType": "LOT_SIZE", "minQty": "0.000015", "maxQty": "9000",
+                                    "stepSize": "0.00001"}
+    r = parse_metadata(json.dumps(meta))
+    ok = v(r, "BUY", "60000.01", "0.00010")
+    assert ok.ok, ok.failures  # price % tick == 0 and qty % step == 0, even though (x - min) % inc != 0
+    bad_price = v(r, "BUY", "60000.015", "0.00010")  # (price - minPrice) % tick == 0, but price % tick != 0
+    assert bad_price.first_failure() == "PRICE_FILTER:tickSize"
+    bad_qty = v(r, "SELL", "60000", "0.000105")  # (qty - minQty) % step == 0, but qty % step != 0
+    assert bad_qty.first_failure() == "LOT_SIZE:stepSize"
+    assert v(r, "BUY", "60000", "0.00001").first_failure() == "LOT_SIZE:minQty"  # multiple, but below minQty
+    # rounding helpers produce absolute multiples, so a rounded order passes
+    assert v(r, "BUY", floor_to(D("60000.017"), r.tick), floor_to(D("0.0001049"), r.step)).ok

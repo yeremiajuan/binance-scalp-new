@@ -37,8 +37,12 @@
 - **Sellable residual without a position blocks entries.** If dust became sellable because the price rose,
   entries are blocked rather than the residual being liquidated automatically. This is conservative and
   disclosed, but it could stall a long run until that is designed.
-- **Exposure breach at fill cancels.** An entry whose exposure would be exceeded at the fill observation is
-  canceled, not resized.
+- **Fill-time resizing is a model choice.** A real IOC cannot be resized after submission. Phase 1 caps the
+  simulated fill at the fill-time risk and exposure limits, so the modeled risk never exceeds the budget. This
+  makes simulated entries smaller, never larger, than submitted.
+- **Health exits flatten on any data interruption.** Stale quotes (over 2 s), a late or missing candle, or a
+  gap with an open position queue an exit. With bursty real feeds this may exit often. It is the
+  conservative reading of the plan's runtime table, and how often it fires is a Phase 2 measurement.
 - **Offline replay restart is not the forward-runner policy.** Restarting resumes the exact pending
   simulation state. The Phase 2 policy (cancel unfilled entries, flatten recovered inventory at the next fresh
   quote, rearm after health checks) is deliberately not implemented.
@@ -56,5 +60,15 @@
 
 ## Defects
 
-No defect is known at hand-off beyond the limitations above. This is the implementer's own assessment and has
-not been independently reviewed.
+The independent review of `48b60e2` found four defects. All are fixed, with regression tests that fail on
+`48b60e2` and pass now:
+
+| # | Finding | Fix | Regression tests |
+|---|---|---|---|
+| 1 (P1) | Outages, late candles and missing minutes did not queue an exit; recovery inside the stop/target range left the position open | Health triggers create a persistent exit intent, executed only on fresh data after latency | `test_execution.py::test_outage_queues_exit_even_when_recovery_is_inside_the_stop_target_range`, `test_late_or_missing_candle_queues_exit_for_fresh_data[candle_late/candle_missing]` |
+| 2 (P1) | Fill-time sizing could exceed the risk budget (wider spread still within the cap) | Fill quantity capped by the risk and exposure limits recomputed at the fill observation | `test_execution.py::test_fill_time_risk_cap_reduces_quantity_when_costs_widen` |
+| 3 (P1) | Reconciliation compared only ids; an altered snapshot stop (1 USDT) passed and was used | Economic field cross-checks for position, pending order, intents, baseline, last exit and rebuilt inputs | `test_persistence.py::test_snapshot_economic_fields_must_match_persisted_records[...]` (12 cases), `test_pending_order_fields_must_match...` (8 cases), `test_persisted_protective_price_tampering_is_detected_too` |
+| 4 (P2) | Increment checks used `(x - min) % inc` | `price % tickSize`, `qty % stepSize` | `test_constraints.py::test_increments_are_absolute_multiples_not_offsets_from_minimums` |
+
+Beyond these, no defect is known. That is the implementer's assessment; it still needs independent
+re-review.

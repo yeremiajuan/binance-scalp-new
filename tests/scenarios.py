@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from paperbot.replay import new_run, resume_run
-from paperbot.synthetic import BarSpec, Scenario, breakout_bar, emit_edge, range_bars, warm_scenario
+from paperbot.synthetic import BarSpec, Scenario, breakout_bar, emit_edge, keepalive, range_bars, warm_scenario
 from paperbot.timeutil import US_PER_MS
 
 MS = US_PER_MS
@@ -46,10 +46,12 @@ def follow_range(sc: Scenario, prev: BarSpec, n: int, level, **kw) -> list[BarSp
 
 def rich_scenario() -> Scenario:
     """Two trades: (1) partial entry, target with thin bids -> several exit IOCs, base-fee dust;
-    (2) full entry, quote outage while the market gaps through the stop, exit on later quotes."""
+    (2) full entry, quote outage while the market gaps through the stop: the outage queues a health exit that
+    executes only on fresh quotes after latency."""
     sc, bb = entry_scenario()
     sc.mid_quote(bb.end_us + 900 * MS, 61502, ask_qty="0.02", bid_qty="0.02")
     t = bb.end_us + 20_000 * MS
+    keepalive(sc, bb.end_us + 900 * MS, t, 61502)
     sc.mid_quote(t, 62200, bid_qty="0.01")
     for k in range(1, 5):
         sc.mid_quote(t + k * 400 * MS, 62200 - 3 * k, bid_qty="0.01")

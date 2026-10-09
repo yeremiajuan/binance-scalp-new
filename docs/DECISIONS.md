@@ -63,20 +63,31 @@ strategy parameter, a cost assumption or a fill rule in a direction that makes r
     `ready + quote_max_age` (2 s). Without such an observation the IOC's outcome is unknown, so it is
     recorded as a zero fill. A buy is canceled; a sell's exit intent persists and retries on later fresh data.
     This prevents a quote long after an outage from standing in for the book at readiness.
-18. **Exposure at the entry fill** is rechecked. If it would be exceeded, the order is canceled rather than
-    reduced.
+18. **Fill-time caps** (review finding 2). At the fill observation the entry fill quantity is
+    `floor_step(min(order qty, 10% of visible ask, risk cap, exposure cap))`. The risk cap is
+    `0.001E/(d + pC)` with E, p and C (including the observed spread) recomputed from that observation. The
+    exposure cap is `(0.20E - BTC mark) / (bid * BTC credited per unit)`. The submitted quantity is never
+    enlarged. A reduced fill is a partial fill whose order outcome names the binding cap
+    (`ioc_remainder_canceled;fill_cap=risk`); a zero cap is a zero fill (`fill_cap:risk`). The engine also
+    asserts the budget and exposure invariants on every entry fill.
 19. **Exit orders** sell `floor_step(free BTC)` capped at `maxQty`. When the remaining inventory cannot form a
     valid SELL (below step, `minQty` or minimum notional at the protected limit), it is kept as dust with basis,
     and the position closes with `residual_unsellable`/`exit_complete`. Dust stays in the average-cost pool. A
     later position's exit may sell part of it once `floor_step(total)` includes it, and that is accounted
     through the same pool.
 20. **Exit triggers** are collected per event and the highest priority wins
-    (halt > stop > trend invalidation > target > timeout). There is one exit intent per position, its reason is
+    (halt > health > stop > trend invalidation > target > timeout). **Health triggers** (review finding 1):
+    with an open position, stale quotes, a late finalized candle, a missing minute or a candle gap queue a
+    persistent exit intent such as `health:quotes_stale`. It is submitted only on a fresh quote and can fill
+    only on a later eligible observation after latency, so an outage never produces a fill. When the expected
+    bar itself is the first event past the lateness deadline, it is classified late, not missing. There is one exit intent per position, its reason is
     fixed when it is created, and the intent survives partial and zero fills until no sellable inventory remains.
 21. **Every exit retry** is a new order id submitted on the observation that closed the previous IOC. It
     references that observation and has a new limit and new latency, so it can only fill on a later
     observation.
-22. **Filters are validated at submission only**, after rounding, as an exchange would. They are not
+22. **Filters are validated at submission only**, after rounding, as an exchange would. Increments are
+    absolute multiples: `price % tickSize == 0` and `qty % stepSize == 0` (review finding 4), not offsets from
+    `minPrice`/`minQty`. They are not
     re-applied to fill fragments. Zero increments or limits disable that rule without rounding or division.
     Reference prices for PERCENT_PRICE filters come from `reference_price` input events (labeled synthetic),
     must match `avgPriceMins` and must be at most `reference_max_age_ms` old.
@@ -108,6 +119,17 @@ strategy parameter, a cost assumption or a fill rule in a direction that makes r
     alone is a consistent artifact. Every monetary column is TEXT. One `BEGIN IMMEDIATE ... COMMIT` per input
     event or control action writes the input log, cursor, decision, reservation, order, fill, ledger deltas,
     position/risk/health rows, balances and engine snapshot together.
-29. The lock file is `<realpath(state)>.lock`, held with `flock` for the process lifetime. A database with more
+29. **Startup reconciliation** (review finding 3) compares the snapshot's economic fields against persisted
+    records, not just ids:
+    - The open position (entry price, credited quantity and time versus its entry fill; stop distance versus
+      its candidate; stop/target versus `entry ∓ d`/`entry + 3d` and the positions row; exit-order count; exit
+      intent).
+    - The pending order (every field versus its orders row; for entries, close/ATR/stop distance/qty/limit and
+      signal time versus its candidate).
+    - Active exit intents, the last exit time, and the day baseline versus its event.
+    - On resume, the indicator state, last quote and reference price, rebuilt from the committed input
+      events.
+    Any disagreement halts before mutation.
+30. The lock file is `<realpath(state)>.lock`, held with `flock` for the process lifetime. A database with more
     than one hard link is refused, because hard links defeat path canonicalization. A network-filesystem check
     reads `/proc/self/mountinfo` on Linux.

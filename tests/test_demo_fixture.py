@@ -27,7 +27,7 @@ def test_demo_replay_outcomes(tmp_path):
     assert r["candidates"]["skip_reasons"] == {"warmup_incomplete": 9, "spread": 1}
     assert r["orders"]["by_status"] == {"filled": 10, "partial": 2, "canceled": 1}
     exits = [p["exit_reason"] for p in rows(db, "SELECT exit_reason FROM positions ORDER BY opened_us")]
-    assert exits == ["target", "target", "timeout", "stop", "timeout", None]
+    assert exits == ["target", "target", "timeout", "health:quotes_stale", "timeout", None]
     assert r["cursor"]["dispositions"] == {"accepted": 13215, "rejected": 14, "duplicate": 1}
     assert r["risk"]["day"] == "2026-10-02" and r["risk"]["latches"] == []
     assert r["mark"]["fresh"] and r["inventory"]["btc_total"] > 0  # open inventory valued, not force-closed

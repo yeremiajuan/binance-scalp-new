@@ -45,7 +45,7 @@ def test_reference_run_exercises_the_interesting_paths(reference):
     sells = [o for o in orders if o["side"] == "SELL"]
     assert len(sells) >= 3 and any(o["status"] == "partial" for o in sells)
     pos = rows(db, "SELECT * FROM positions ORDER BY opened_us")
-    assert [p["exit_reason"] for p in pos] == ["target", "stop"]
+    assert [p["exit_reason"] for p in pos] == ["target", "health:quotes_stale"]
     r = report(db)
     assert r["reconciliation"]["ok"] and r["pnl"]["identity"]["holds"]
     assert r["inventory"]["dust_btc"] > 0
@@ -304,3 +304,85 @@ def test_money_is_decimal_text_never_real(tmp_path, cfg_path):
             types = {r[0] for r in conn.execute(f"SELECT DISTINCT typeof({col}) FROM {table}")}
             assert types == {"text"}, (table, col, types)
     conn.close()
+
+
+# ---------------------------------------------------------------- snapshot vs persisted economic fields
+
+
+def _open_position_state(tmp_path, cfg, pending: bool = False):
+    from paperbot.synthetic import keepalive
+
+    sc, bb = entry_scenario()
+    n_pending = len(sc.objs)  # stop right after the breakout candle: entry order pending
+    sc.mid_quote(bb.end_us + 900 * MS, 61502)
+    keepalive(sc, bb.end_us + 900 * MS, bb.end_us + 20_000 * MS, 61502)
+    db = run(tmp_path, sc, cfg, stop_after=n_pending if pending else len(sc.objs) - 3)
+    return db
+
+
+def _edit_snapshot(db, mutate):
+    conn = sqlite3.connect(db)
+    snap = json.loads(conn.execute("SELECT json FROM engine_state").fetchone()[0])
+    mutate(snap)
+    conn.execute("UPDATE engine_state SET json = ?", (json.dumps(snap, sort_keys=True, separators=(",", ":")),))
+    conn.commit()
+    conn.close()
+
+
+def _set(path, value):
+    def mutate(snap):
+        node = snap
+        for k in path[:-1]:
+            node = node[k]
+        node[path[-1]] = value
+    return mutate
+
+
+@pytest.mark.parametrize("path, value, needle", [
+    (("position", "stop_price"), {"$d": "1"}, "position.stop_price"),  # the review's reproduction
+    (("position", "target_price"), {"$d": "99999999"}, "position.target_price"),
+    (("position", "entry_price"), {"$d": "60000"}, "position.entry_price"),
+    (("position", "stop_distance"), {"$d": "5"}, "position.stop_distance"),
+    (("position", "entry_qty"), {"$d": "0.003"}, "position.entry_qty"),
+    (("position", "opened_us"), 1, "position.opened_us"),
+    (("position", "exit_orders"), 3, "exit order count"),
+    (("position", "exit_intent"), {"intent_id": "x", "reason": "target", "created_us": 1, "attempts": 0,
+                                   "blocked_reason": None}, "active exit intents"),
+    (("strategy", "atr"), {"$d": "1"}, "indicator/strategy state"),
+    (("last_quote", "bid"), {"$d": "1"}, "last quote"),
+    (("risk", "day_baseline"), {"$d": "5000"}, "day baseline"),
+    (("last_exit_us",), 123, "last exit time"),
+])
+def test_snapshot_economic_fields_must_match_persisted_records(tmp_path, cfg_path, path, value, needle):
+    db = _open_position_state(tmp_path, cfg_path)
+    assert rows(db, "SELECT status FROM positions") == [{"status": "open"}]
+    _edit_snapshot(db, _set(path, value))
+    before = dump_db(db)
+    with pytest.raises(ReconciliationError) as exc:
+        resume(tmp_path, cfg_path)
+    assert any(needle in p for p in exc.value.problems), exc.value.problems
+    assert dump_db(db) == before  # halted before any mutation
+
+
+@pytest.mark.parametrize("field, value", [
+    ("limit_price", {"$d": "99999"}), ("qty", {"$d": "0.1"}), ("ready_us", 0), ("signal_close", {"$d": "1"}),
+    ("atr", {"$d": "1"}), ("stop_distance", {"$d": "1"}), ("reference_quote_id", "q-x"), ("signal_us", 5),
+])
+def test_pending_order_fields_must_match_persisted_order_and_candidate(tmp_path, cfg_path, field, value):
+    db = _open_position_state(tmp_path, cfg_path, pending=True)
+    assert rows(db, "SELECT status FROM orders") == [{"status": "pending"}]
+    _edit_snapshot(db, _set(("order", field), value))
+    with pytest.raises(ReconciliationError) as exc:
+        resume(tmp_path, cfg_path)
+    assert any("order" in p for p in exc.value.problems), exc.value.problems
+
+
+def test_persisted_protective_price_tampering_is_detected_too(tmp_path, cfg_path):
+    db = _open_position_state(tmp_path, cfg_path)
+    conn = sqlite3.connect(db)
+    conn.execute("UPDATE positions SET stop_price = '1'")
+    conn.commit()
+    conn.close()
+    with pytest.raises(ReconciliationError) as exc:
+        resume(tmp_path, cfg_path)
+    assert any("position.stop_price" in p for p in exc.value.problems)

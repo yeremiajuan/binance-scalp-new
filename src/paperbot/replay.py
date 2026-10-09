@@ -90,7 +90,8 @@ def new_run(config_path: str, input_path: str, state_path: str, *, stop_after: i
             store.close()
 
 
-def open_engine(lock: StateLock, *, config: Config | None = None, input_sha: str | None = None) -> Engine:
+def open_engine(lock: StateLock, *, config: Config | None = None, input_sha: str | None = None,
+                input_events: list | None = None) -> Engine:
     """Open an existing account under ``lock`` and reconcile it before any mutation."""
     store = Storage.open_existing(lock)
     try:
@@ -106,7 +107,7 @@ def open_engine(lock: StateLock, *, config: Config | None = None, input_sha: str
             )
         state = store.load_state()
         require_reconciled(store, state, config_sha=stored_cfg.sha256, metadata_sha=rules.sha256,
-                           input_sha=input_sha)
+                           input_sha=input_sha, input_events=input_events)
         return Engine(stored_cfg, rules, store, state)
     except BaseException:
         store.close()
@@ -120,7 +121,7 @@ def resume_run(config_path: str, input_path: str, state_path: str, *, stop_after
     inp = load_input(input_path)
     _check_input(cfg, inp)
     with StateLock(state_path) as lock:
-        engine = open_engine(lock, config=cfg, input_sha=inp.sha256)
+        engine = open_engine(lock, config=cfg, input_sha=inp.sha256, input_events=inp.events)
         try:
             if engine.rules.sha256 != rules.sha256:
                 raise StateError("metadata fixture changed since the account was created")

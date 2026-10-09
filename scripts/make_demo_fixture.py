@@ -126,9 +126,10 @@ class Builder:
         self.range(24)
 
     def finish(self, duplicate_after: int = 2000) -> Scenario:
-        # a closing quote after the last candle, so the open inventory is valued at a fresh mark
-        self._ev(self.t + 600 * US_PER_MS, {
-            "type": "quote", "id": "q-final", "recv": iso(self.t + 600 * US_PER_MS), "bid": dtext(self.close - 1),
+        # the next minute's first quote, before the last candle arrives: data stays fresh (no health exit) and
+        # the open inventory is valued at a fresh mark
+        self._ev(self.t + 100 * US_PER_MS, {
+            "type": "quote", "id": "q-final", "recv": iso(self.t + 100 * US_PER_MS), "bid": dtext(self.close - 1),
             "ask": dtext(self.close + 1), "bid_qty": "0.5", "ask_qty": "0.5"})
         self.events.sort(key=lambda e: (e[0], e[1]))
         objs = [o for _, _, o in self.events]
