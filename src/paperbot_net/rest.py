@@ -5,6 +5,8 @@ klines 2, avgPrice 2, referencePrice 2. The client:
 
 * sends no API key and no signed or timestamped parameters, and supports no method but GET;
 * tracks ``X-MBX-USED-WEIGHT-1M`` and keeps its own usage below ``budget_fraction`` of the REQUEST_WEIGHT limit;
+  a server reading counts only within the (local wall-clock) minute it was received, because the 1m counter
+  restarts every minute; an old reading must never block requests in later minutes;
 * on 429 pauses every request for ``Retry-After`` seconds; on 418 (IP ban) does the same and reports a ban;
 * treats 403 (WAF), 5xx and transport failures as errors to retry later, never as success;
 * maps referencePrice error -2043 ("never set") to an explicit "no reference price" answer.
@@ -104,7 +106,8 @@ class PublicRest:
     weight_limit: int = DEFAULT_WEIGHT_LIMIT
     paused_until: float = 0.0
     banned: bool = False
-    used_weight: int = 0
+    used_weight: int = 0  # latest X-MBX-USED-WEIGHT-1M reading
+    used_weight_minute: int = -1  # wall-clock minute of that reading
     _minute: int = -1
     _local_weight: int = 0
     calls: list[RestCall] = field(default_factory=list)
@@ -131,7 +134,8 @@ class PublicRest:
         if minute != self._minute:
             self._minute, self._local_weight = minute, 0
         budget = int(self.weight_limit * self.budget_fraction)
-        if max(self._local_weight, self.used_weight if minute == self._minute else 0) + weight > budget:
+        server = self.used_weight if self.used_weight_minute == minute else 0
+        if max(self._local_weight, server) + weight > budget:
             raise Throttled(60 - self.wall() % 60)
         url = self.url(name, params)
         sent = self.wall()
@@ -146,6 +150,7 @@ class PublicRest:
         uw = resp.headers.get("x-mbx-used-weight-1m")
         if uw is not None and uw.isdigit():
             self.used_weight = int(uw)
+            self.used_weight_minute = int(recv // 60)
         text = resp.body.decode("utf-8", "replace")
         ra = resp.headers.get("retry-after")
         self.calls.append(RestCall(name, url, sent, recv, resp.status, uw, ra, text))

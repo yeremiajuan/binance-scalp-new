@@ -8,7 +8,7 @@ from decimal import Decimal
 from . import codec
 from .constraints import parse_metadata
 from .engine import EngineState
-from .events import CandleEvent, InputError, QuoteEvent, RawEvent, ReferenceEvent, parse_event
+from .events import CandleEvent, InputError, MetadataEvent, QuoteEvent, RawEvent, ReferenceEvent, parse_event
 from .money import ZERO, ceil_to, exact, floor_to
 from .storage import Storage
 from .strategy import TARGET_STOP_MULT, Bar, StrategyState
@@ -135,13 +135,23 @@ def reconcile(store: Storage, state: EngineState, *, config_sha: str | None = No
     want_pos = [state.position.position_id] if state.position is not None else []
     if open_pos != want_pos:
         p.append(f"open positions {open_pos} != snapshot {want_pos}")
-    rules = active_rules(store, state, meta)
-    tick = rules.tick if rules is not None else None
+    if store.record_payloads:
+        p += _check_payloads(store, state)
+        if input_events is None:
+            input_events = payload_events(store)
     if state.position is not None and open_pos == want_pos:
-        if tick is None:
-            p.append("open position without any metadata version")
+        # stop/target were frozen with the tick size in force at the entry fill; later metadata versions apply
+        # only to later orders
+        derived = _entry_version(c, state, input_events) if store.record_payloads else None
+        pv = state.position.metadata_sha256
+        if pv is not None and derived is not None and pv != derived[0]:
+            p.append(f"position entry metadata version {pv} != version in force at the entry fill "
+                     f"(seq {derived[1]}): {derived[0]}")
+        rules, why = entry_rules(store, state, meta, derived[0] if derived else None)
+        if rules is None:
+            p.append(why)
         else:
-            p += _check_position(c, state, tick)
+            p += _check_position(c, state, rules.tick)
     active = [r["intent_id"] for r in c.execute("SELECT intent_id FROM exit_intents WHERE status = 'active'")]
     want_active = ([state.position.exit_intent.intent_id]
                    if state.position is not None and state.position.exit_intent is not None else [])
@@ -153,10 +163,6 @@ def reconcile(store: Storage, state: EngineState, *, config_sha: str | None = No
     if closed != state.last_exit_us:
         p.append(f"last exit time {state.last_exit_us} != latest closed position {closed}")
     p += _check_risk_marks(c, state)
-    if store.record_payloads:
-        p += _check_payloads(store, state)
-        if input_events is None:
-            input_events = payload_events(store)
     if state.metadata_hash is not None and store.metadata_bundle(state.metadata_hash) is None:
         p.append(f"active metadata version {state.metadata_hash} is not stored")
     if input_events is not None:
@@ -263,6 +269,40 @@ def _check_risk_marks(c, state: EngineState) -> list[str]:
             _same(p, "day baseline", r.day_baseline, d["equity"])
             _same(p, "baseline day", r.day, d["day"])
     return p
+
+
+def entry_rules(store: Storage, state: EngineState, meta: dict | None = None, derived: str | None = None):
+    """(rules that froze the open position's stop/target, problem text when they are unavailable).
+
+    Public sessions use the position's recorded entry version; positions opened before that field existed use
+    the version derived from the committed inputs. Synthetic accounts have one fixed metadata fixture."""
+    pos = state.position
+    version = pos.metadata_sha256 if pos is not None and pos.metadata_sha256 is not None else derived
+    if version is not None:
+        text = store.metadata_bundle(version)
+        if text is None:
+            return None, f"entry metadata version {version} of position {pos.position_id} is not stored"
+        return parse_metadata(text), ""
+    if state.metadata_hash is not None:
+        return None, f"open position {pos.position_id if pos else None} has no entry metadata version"
+    rules = active_rules(store, state, meta)
+    return rules, "" if rules is not None else "open position without any metadata version"
+
+
+def _entry_version(c, state: EngineState, events: list[RawEvent]) -> tuple[str | None, int] | None:
+    """(metadata version in force when the open position's entry fill was processed, fill seq)."""
+    row = c.execute("SELECT f.seq FROM fills f JOIN orders o USING(order_id) WHERE o.purpose = 'entry' "
+                    "AND o.position_id = ?", (state.position.position_id,)).fetchone()
+    if row is None:
+        return None  # reported by _check_position
+    accepted = {r[0] for r in c.execute("SELECT seq FROM input_log WHERE disposition = 'accepted'")}
+    version = None
+    for raw in events:
+        if raw.seq > row["seq"]:
+            break
+        if raw.seq in accepted and isinstance(raw.event, MetadataEvent):
+            version = raw.event.sha256
+    return version, row["seq"]
 
 
 def active_rules(store: Storage, state: EngineState, meta: dict | None = None):

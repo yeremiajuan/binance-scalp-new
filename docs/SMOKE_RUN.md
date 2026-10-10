@@ -16,7 +16,7 @@ separately authorized, on the machine that will host the trial.
 2. Install, then run the checks and record their outputs:
 
 ```bash
-python3 -m venv .venv && . .venv/bin/activate && pip install -e '.[test]'
+python3 -m venv .venv && . .venv/bin/activate && pip install -e '.[test]'   # websockets >= 15.0 is required
 python -m pytest -q && ruff check src tests scripts && python -m build
 paperbot validate-config config/forward.toml
 ```
@@ -43,7 +43,8 @@ paperbot positions --state state/smoke.sqlite
 
 | Drill | How | Expected |
 |---|---|---|
-| Forced disconnect | block the WS host briefly (firewall rule) or drop the network for ~2 min | `feed_ws_disconnected`, entry block, health exit if exposed, reconnect with backoff, gap backfill, no historical entry |
+| Forced disconnect | block the WS host briefly (firewall rule) or drop the network for ~2 min | `feed_ws_disconnected`, `quotes_stale`, `feed_disconnected` + `feed_recovery` blocks, health exit if exposed, reconnect with backoff, `feed_continuity_check` + gap backfill, no historical entry, `rearmed` only after a post-reconnect quote |
+| Clock check failure | block `api.binance.com` before starting (or during a check) | `clock_unsynced` until a check succeeds; `feed_clock_check_failed` retries at 15 s, 30 s, ... |
 | Stale quotes | as above, or suspend the process for 5 s (`kill -STOP`/`-CONT`) | `quotes_stale`, unprotected time disclosed, exits only on fresh quotes |
 | Restart | `paperbot stop`, then `run` again | session row, retired attempts, flatten before rearm |
 | Kill/reset | `paperbot kill ...` then `paperbot reset ... --confirm` while running | control rows, routed via the owner |

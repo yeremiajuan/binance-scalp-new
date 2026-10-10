@@ -5,7 +5,7 @@
 * **Phase 1 (accepted at `e3c5a92`)**: an offline, deterministic paper core (strategy B20-T5-v1, conservative
   LIMIT IOC simulation, native-fee accounting, exchange constraints, risk latches, atomic SQLite state) with
   SYNTHETIC replay.
-* **Phase 2 (this change, awaiting independent review)**: a local forward runner on **public** Binance spot market
+* **Phase 2 (review fixes for `87b130b` applied, awaiting independent re-review)**: a local forward runner on **public** Binance spot market
   data (REST + WebSocket), recording and deterministic replay of recorded sessions, health/recovery handling,
   local monitoring commands and optional Telegram notifications.
 
@@ -18,7 +18,7 @@ session and the month-long trial have **not** been run (see `docs/SMOKE_RUN.md`)
 
 ```bash
 python3 -m venv .venv && . .venv/bin/activate      # Python 3.12+
-pip install -e '.[test]'                            # runtime dependency: websockets (public market streams)
+pip install -e '.[test]'                            # runtime dependency: websockets >= 15.0 (public streams)
 python -m pytest -q                                 # ~3-4 minutes; offline: no network, no credentials
 ruff check src tests scripts
 python -m build                                     # sdist + wheel
@@ -58,7 +58,7 @@ not serve `executionRules`/`referencePrice`, so entries then stay blocked (an un
 ### Local facts you must provide (not verifiable from this repository)
 
 * The machine's OS (only Linux was exercised), that it stays awake for the whole session, and a running NTP
-  client (entries are blocked when `|server - local| > 1 s`).
+  client (entries stay blocked until a server-time check succeeds with `|server - local| <= 1 s`).
 * Outbound connectivity: HTTPS 443 to `api.binance.com` and WSS 443 to `data-stream.binance.vision`. The
   environment where this code was written could **not** reach Binance (DNS/egress blocked), so no live
   connectivity has been tested. Whether Binance public data is accessible from your location/network is yours to
@@ -85,7 +85,9 @@ paperbot replay-recording --config config/forward.toml --input state/session.jso
 While it runs, `kill`/`reset`/`stop` go through its local control socket (`<state>.ctl`, mode 0600), so there
 is still a single writer. On restart it reconciles the database, cancels unfilled entries, retires unresolved IOC
 attempts without fills, treats pre-restart quotes as stale, re-warms/backfills indicators (backfilled bars never
-create entries), flattens recovered tradable inventory on fresh quotes, and only then re-arms entries.
+create entries), flattens recovered tradable inventory on fresh quotes, and only then re-arms entries. A stream
+disconnect is handled the same way: quotes become stale, entries stay blocked after reconnecting until candle
+continuity is revalidated from REST and a quote received after the reconnection arrives.
 
 ### Optional Telegram (disabled by default)
 

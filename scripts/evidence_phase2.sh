@@ -71,5 +71,55 @@ sed -n '/^### paperbot status/,$p' "$EV/recorded_replay.txt" > "$EV/status_sampl
   run grep -n "method=" src/paperbot_net/rest.py
 } > "$EV/static_scan.txt" 2>&1
 
+# Review of 87b130b: the regression tests fail against the reviewed source and pass on this one.
+REVIEWED=87b130b
+REGRESSIONS=(
+  "tests/test_forward.py::test_reconnect_never_enters_on_pre_disconnect_quotes"
+  "tests/test_forward.py::test_failed_initial_clock_check_blocks_entries_until_a_check_succeeds"
+  "tests/test_forward.py::test_clock_check_expires_without_a_recent_success"
+  "tests/test_forward.py::test_metadata_tick_change_keeps_an_open_position_reconciled_and_restartable"
+  "tests/test_public_protocol.py::test_server_weight_reading_expires_at_its_minute_boundary_and_throttling_recovers"
+  "tests/test_phase2_static.py::test_websockets_floor_matches_the_real_connector_arguments"
+)
+{
+  mkdir -p "$WORK/reviewed"
+  git archive "$REVIEWED" src pyproject.toml | tar -x -C "$WORK/reviewed"
+  step "regression tests against the reviewed source ($REVIEWED): expected to FAIL"
+  echo "\$ PYTHONPATH=<$REVIEWED>/src python -m pytest -p no:cacheprovider -rf ${REGRESSIONS[*]}"
+  PYTHONPATH="$WORK/reviewed/src" python -m pytest -p no:cacheprovider -q -rf "${REGRESSIONS[@]}" 2>&1 \
+    | grep -E "^(FAILED|PASSED|ERROR)|passed|failed"
+  echo "[exit ${PIPESTATUS[0]}]"
+  step "regression tests against this source: expected to pass"
+  run python -m pytest -p no:cacheprovider -q -rA "${REGRESSIONS[@]}"
+} > "$EV/review_regressions.txt" 2>&1
+
+# websockets: the real connector at exactly the declared minimum (15.0); older releases are refused.
+{
+  python3 -m venv "$WORK/ws15" && "$WORK/ws15/bin/pip" install -q -e "$ROOT[test]" >/dev/null \
+    && "$WORK/ws15/bin/pip" install -q "websockets==15.0" >/dev/null
+  step "websockets 15.0 (declared minimum): real-connector tests"
+  run "$WORK/ws15/bin/python" -m pip show websockets
+  run "$WORK/ws15/bin/python" -m pytest -p no:cacheprovider -q tests/test_runner_e2e.py \
+    "tests/test_phase2_static.py::test_websockets_floor_matches_the_real_connector_arguments"
+  for v in 13.1 14.2; do
+    python3 -m venv "$WORK/ws$v" && "$WORK/ws$v/bin/pip" install -q "websockets==$v" >/dev/null
+    step "websockets $v (below the minimum)"
+    echo "\$ connect('ws://127.0.0.1:9/', ping_interval=None, open_timeout=1)   # what 87b130b passed"
+    "$WORK/ws$v/bin/python" -c "
+from websockets.sync.client import connect
+try:
+    connect('ws://127.0.0.1:9/', ping_interval=None, open_timeout=1)
+except Exception as e:
+    print(type(e).__name__ + ':', e)"
+    echo "\$ PYTHONPATH=src python -c 'check_websockets()'   # this change: refused before any lock"
+    PYTHONPATH="$ROOT/src" "$WORK/ws$v/bin/python" -c "
+from paperbot_net.ws import check_websockets
+try:
+    check_websockets()
+except Exception as e:
+    print(type(e).__name__ + ':', e)"
+  done
+} > "$EV/websockets_minimum.txt" 2>&1
+
 (cd "$EV" && sha256sum ./*.txt > SHA256SUMS)
 echo "Phase 2 evidence written to $EV"

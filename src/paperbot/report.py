@@ -260,11 +260,14 @@ def render_status(r: dict) -> str:
     ]
     fw = r.get("forward")
     if fw:
+        age = fw.get("clock_check_age_s")
+        clock = "UNVERIFIED" if age is None else f"checked {age}s ago"
         lines += [
             f"feed: stream {fw['stream']} · quotes {'fresh' if fw['quotes_fresh'] else 'STALE'} (mark age "
             f"{_f(m['age_us'])}us) · last 1m bar {fw['last_bar_start'] or '-'} · candle missing {fw['candle_missing']}",
             f"entry blocks: {', '.join(fw['blocks']) or 'none'} · recovery signaled {fw['recovery_signaled']} · "
-            f"metadata {fw['metadata_sha256'][:12] if fw['metadata_sha256'] else 'NONE'} age {fw['metadata_age_s']}s",
+            f"metadata {fw['metadata_sha256'][:12] if fw['metadata_sha256'] else 'NONE'} age {fw['metadata_age_s']}s"
+            f" · clock {clock}",
             f"queued exit: {fw['queued_exit'] or 'none'} · pending order: {fw['pending_order'] or 'none'} · "
             f"unprotected exposure (cumulative) {fw['unprotected_total_s']}s · outbox {fw['outbox'] or '{}'}",
         ]
@@ -316,6 +319,9 @@ def _forward_section(store: Storage, state, cfg, rules, health_rows: list[dict],
         "metadata_age_s": None if state.metadata_fetched_us is None or now is None
         else (now - state.metadata_fetched_us) // 1_000_000,
         "metadata_status": rules.status if rules is not None else None,
+        "clock_check_age_s": None if state.clock_checked_us is None or now is None
+        else (now - state.clock_checked_us) // 1_000_000,
+        "position_metadata_sha256": pos.metadata_sha256 if pos is not None else None,
         "execution_rules": [dict(r) for r in rules.execution_rules] if rules is not None else [],
         "reference_price": None if state.ref_price is None else {
             "value": state.ref_price.value, "received": ts(state.ref_price.recv_us)},

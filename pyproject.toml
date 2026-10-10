@@ -8,7 +8,7 @@ version = "0.2.0"
 description = "PAPER-only Binance spot BTCUSDT paper bot: offline synthetic core (Phase 1) and a public-market-data forward runner (Phase 2). No live trading."
 requires-python = ">=3.12"
 dependencies = [
-    "websockets>=13,<16",  # public market streams (sync client); the only runtime dependency
+    "websockets>=15.0,<16",  # public market streams (sync client; ping_interval needs >= 15.0); only runtime dependency
 ]
 
 [project.optional-dependencies]

@@ -10,6 +10,7 @@ from fake_binance import FakeMarket, Harness, boot, exchange_info, standard_bars
 
 from paperbot.forward import Item
 from paperbot.money import dtext
+from paperbot.normalize import kline_candle
 from paperbot.storage import ProfileLock, StateLocked
 from paperbot.synthetic import breakout_bar, range_bars
 from paperbot.timeutil import MINUTE_US, US_PER_MS, US_PER_S
@@ -51,11 +52,12 @@ def enter(h, t, bar=250):
 def test_startup_blocks_entries_until_warmup_stream_quote_and_metadata_then_rearms(h):
     now = BARS[249].end_us + 10_000 * MS
     h.start(now)
-    assert set(h.st.health.blocks) == {"feed_disconnected", "restart_recovery"}
+    assert set(h.st.health.blocks) == {"feed_disconnected", "restart_recovery", "clock_unsynced"}
     names = [n for n, _ in h.requests]
     assert names == ["time", "metadata", "avgPrice", "referencePrice", "klines"]
     h.answer_all(now + 100 * MS)
     assert h.st.strategy.five_count == 50 and h.st.metadata_hash is not None
+    assert "clock_unsynced" not in h.st.health.blocks  # the server-time check succeeded
     h.tick(now + 150 * MS)
     assert "restart_recovery" in h.st.health.blocks  # no stream yet: not recovered
     h.connect(now + 200 * MS)
@@ -131,13 +133,15 @@ def test_reconnect_gap_is_backfilled_indicators_repaired_and_no_retroactive_entr
     assert "feed_disconnected" in h.st.health.blocks
     # bars 246..251 (including the bar-250 breakout) are missed while disconnected; bar 252 arrives live
     live = BARS[252]
-    h.connect(live.end_us)
+    h.connect(live.end_us, answer_continuity=False)
+    assert h.requests and h.requests[-1][0] == "klines"  # continuity is revalidated on every reconnect
+    params = h.requests[-1][1]
+    assert params["startTime"] == BARS[246].start_us // MS and params["purpose"] == "backfill"
     h.quote(live.end_us + 100 * MS, live.close)
     h.bar(live)
-    assert h.requests and h.requests[-1][0] == "klines"
-    params = h.requests[-1][1]
-    assert params["startTime"] == BARS[246].start_us // MS and params["endTime"] == live.start_us // MS - 1
     assert h.st.strategy.last_start_us == BARS[245].start_us  # the live bar is held until the gap is repaired
+    h.tick(live.end_us + 600 * MS)
+    assert "feed_recovery" in h.st.health.blocks  # continuity not yet revalidated: not rearmed
     h.answer_all(live.end_us + 900 * MS)
     st = h.st.strategy
     assert st.last_start_us == live.start_us and st.run_bars == 253  # contiguous: no indicator reset
@@ -150,7 +154,7 @@ def test_reconnect_gap_is_backfilled_indicators_repaired_and_no_retroactive_entr
 def test_failed_backfill_releases_held_bars_and_resets_rather_than_forward_fills(h):
     t = booted(h, at_bar=245)
     h.disconnect(t)
-    h.connect(BARS[250].end_us)
+    h.connect(BARS[250].end_us, answer_continuity=False)
     h.bar(BARS[250])
     h.requests.clear()  # the backfill never answers
     h.tick(BARS[250].end_us + 31 * US_PER_S)
@@ -278,7 +282,7 @@ def test_forward_restart_retires_attempts_flattens_and_rearms_without_inventing_
     assert o["status"] == "zero" and o["outcome_reason"] == "retired_on_restart"
     assert rows(h2.state, "SELECT * FROM fills WHERE order_id = ?", (exit_order,)) == []  # no invented fill
     assert h2.st.balances.btc_total == btc and h2.st.balances.btc_locked == 0
-    assert set(h2.st.health.blocks) == {"feed_disconnected", "restart_recovery"}
+    assert set(h2.st.health.blocks) == {"feed_disconnected", "restart_recovery", "clock_unsynced"}
     h2.answer_all(t2 + 100 * MS)
     h2.connect(t2 + 200 * MS)
     h2.quote(t2 + 300 * MS, 62000)  # fresh: flatten exit submitted
@@ -374,3 +378,125 @@ def test_slow_restart_closes_stale_attempts_through_staleness_rules_without_fill
     assert rows(h2.state, "SELECT * FROM fills WHERE order_id = ?", (exit_order,)) == []
     assert h2.st.position is not None and h2.st.position.exit_intent is not None  # still to be flattened
     h2.close()
+
+
+# ------------------------------------------------- review regressions (87b130b)
+
+
+@pytest.mark.parametrize("mode", ["continuity_answered_first", "bar_held_until_continuity", "engine_direct"])
+def test_reconnect_never_enters_on_pre_disconnect_quotes(h, mode):
+    """Disconnect at candle end +300 ms, reconnect at +400 ms, breakout candle at +500 ms: no buy."""
+    t = booted(h)
+    bb = BARS[250]
+    end = bb.end_us
+    h.run_quotes(t, end + 300 * MS, bb.close)  # fresh quotes right up to the disconnect
+    assert h.st.health.quotes_fresh
+    h.disconnect(end + 300 * MS)
+    assert not h.st.health.quotes_fresh  # a quote from before the disconnect never counts as fresh again
+    assert {"feed_disconnected", "feed_recovery"} <= set(h.st.health.blocks)
+    if mode == "engine_direct":  # the engine alone (no continuity hold) must refuse too
+        h.session.feed("ws_connected", end + 400 * MS, conn=2)
+        h.session.submit(kline_candle(json.loads(ws_kline(bb))["data"], end + 500 * MS))
+        expected_reason = "entry_block:feed_recovery"
+    else:
+        h.connect(end + 400 * MS, answer_continuity=mode == "continuity_answered_first")
+        assert "feed_disconnected" not in h.st.health.blocks and "feed_recovery" in h.st.health.blocks
+        h.bar(bb, delay_ms=500)
+        if mode == "bar_held_until_continuity":
+            assert h.st.strategy.last_start_us == BARS[249].start_us  # held while continuity is revalidated
+            h.answer_all(end + 600 * MS, only={"klines"})
+            expected_reason = "entry_block:feed_recovery"
+        else:
+            expected_reason = "backfill_no_retroactive_entry"  # the REST check already delivered the bar
+    (c,) = rows(h.state, "SELECT * FROM candidates WHERE bar_start_us = ?", (bb.start_us,))
+    assert c["status"] == "skipped" and c["skip_reason"] == expected_reason, c
+    assert rows(h.state, "SELECT * FROM orders") == []
+    if mode != "engine_direct":
+        # rearming needs a quote received after the reconnection
+        h.tick(end + 700 * MS)
+        assert "feed_recovery" in h.st.health.blocks
+        h.quote(end + 800 * MS, bb.close)
+        h.tick(end + 810 * MS)
+        assert h.st.health.blocks == []
+        assert health(h.state, "rearmed")[-1]["detail"].count("feed_recovery") == 1
+
+
+def test_failed_initial_clock_check_blocks_entries_until_a_check_succeeds(h):
+    now = BARS[249].end_us + 10_000 * MS
+    h.start(now)
+    h.answer_all(now + 100 * MS, errors={"time"})  # HTTP 503 (not a rate limit)
+    assert "clock_unsynced" in h.st.health.blocks
+    h.connect(now + 200 * MS)
+    h.msg(ws_avg(h.market.last_close(now), now // MS), now + 250 * MS)
+    h.msg(ws_ref(None, now // MS), now + 260 * MS)
+    bb = BARS[250]
+    t = h.run_quotes(now + 300 * MS, bb.end_us + 300 * MS, bb.close)
+    assert h.st.health.blocks == ["clock_unsynced"]  # everything else recovered; the clock is still unverified
+    assert [n for n, _ in h.requests] == ["time"]  # retried once after 15 s, not hammered
+    h.bar(bb)
+    t = h.run_quotes(t, bb.end_us + 2000 * MS, bb.close + 2)
+    (c,) = rows(h.state, "SELECT * FROM candidates WHERE bar_start_us = ?", (bb.start_us,))
+    assert c["skip_reason"] == "entry_block:clock_unsynced" and rows(h.state, "SELECT * FROM orders") == []
+    h.answer_all(t, errors={"time"})  # the retry fails as well: backoff doubles
+    failed = [json.loads(x["detail"]) for x in health(h.state, "feed_clock_check_failed")]
+    assert [f["retry_in_s"] for f in failed] == [15, 30]
+    t = h.run_quotes(t + 10 * MS, t + 29 * US_PER_S, bb.close + 2)
+    assert h.requests == []
+    t = h.run_quotes(t, t + 2 * US_PER_S, bb.close + 2)
+    assert [n for n, _ in h.requests] == ["time"]
+    h.answer_all(t)  # success within the limit
+    assert h.st.health.blocks == [] and h.st.clock_checked_us is not None
+
+
+def test_clock_check_expires_without_a_recent_success(h):
+    t = booted(h)
+    h.tick(t + 3 * 300 * US_PER_S + US_PER_S)  # clock_check_s 300: no success for more than 3 intervals
+    assert "clock_unsynced" in h.st.health.blocks
+    sets = [json.loads(x["detail"]) for x in health(h.state, "entry_block_set")]
+    assert sets[-1] == {"block": "clock_unsynced", "reason": "clock_check_expired"}
+    assert h.st.clock_checked_us is None
+
+
+def test_metadata_tick_change_keeps_an_open_position_reconciled_and_restartable(tmp_path):
+    from decimal import Decimal
+
+    from fake_binance import FILTERS
+
+    from paperbot.money import ceil_to, floor_to
+    from paperbot.reconcile import reconcile
+    from paperbot.strategy import TARGET_STOP_MULT
+
+    cfg = write_forward_config(tmp_path)
+    m = FakeMarket(BARS)
+    h = Harness(tmp_path, cfg, m)
+    t = enter(h, booted(h))
+    pos = h.st.position
+    v1 = h.st.metadata_hash
+    coarse = Decimal("0.1")
+    assert (floor_to(pos.entry_price - pos.stop_distance, coarse) != pos.stop_price
+            or ceil_to(pos.entry_price + TARGET_STOP_MULT * pos.stop_distance, coarse) != pos.target_price)
+    m.info = exchange_info(filters=[dict(f, tickSize="0.10000000") if f["filterType"] == "PRICE_FILTER" else f
+                                    for f in FILTERS])
+    h.requests.append(("metadata", {}))
+    h.answer_all(t)
+    assert h.st.metadata_hash != v1 and h.st.position is not None
+    assert report(h.state)["reconciliation"]["ok"]  # frozen prices checked against the entry version
+    assert pos.metadata_sha256 == v1
+    stop, target = pos.stop_price, pos.target_price
+    h.close()
+
+    h2 = Harness(tmp_path, cfg, m, session_id="s2")  # restart reconciles (it halted here before the fix)
+    try:
+        assert (h2.st.position.stop_price, h2.st.position.target_price) == (stop, target)
+        assert reconcile(h2.engine.store, h2.st) == []
+        h2.st.position.metadata_sha256 = h2.st.metadata_hash  # a wrong entry version is detected
+        assert any("version in force at the entry fill" in p for p in reconcile(h2.engine.store, h2.st))
+        h2.st.position.metadata_sha256 = None  # positions opened before the field existed: derived from inputs
+        assert reconcile(h2.engine.store, h2.st) == []
+        h2.st.position.metadata_sha256 = v1
+        boot(h2, t + 60 * US_PER_S)  # flatten on fresh quotes: later orders use the current (0.10) rules
+        (ex,) = rows(h2.state, "SELECT * FROM orders WHERE purpose = 'exit'")
+        assert Decimal(ex["limit_price"]) % coarse == 0
+        assert report(h2.state)["reconciliation"]["ok"]
+    finally:
+        h2.close()

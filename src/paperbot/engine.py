@@ -74,7 +74,7 @@ from .strategy import (
     trend_invalidated,
 )
 from .strategy import update as strategy_update
-from .timeutil import MINUTE_US, iso, local_date
+from .timeutil import MINUTE_US, US_PER_S, iso, local_date
 
 # Exit-trigger priority (PROJECT_PLAN.md): halt/health/stop, then trend invalidation, target, timeout.
 # Health triggers carry their cause, e.g. "health:quotes_stale".
@@ -131,6 +131,9 @@ BLOCK_FEED = "feed_disconnected"
 BLOCK_REST = "rest_unavailable"
 BLOCK_CLOCK = "clock_unsynced"
 BLOCK_RECOVERY = "restart_recovery"
+BLOCK_FEED_RECOVERY = "feed_recovery"  # after a disconnect: fresh observations + continuity before rearming
+RECOVERY_BLOCKS = (BLOCK_RECOVERY, BLOCK_FEED_RECOVERY)
+CLOCK_CHECK_STALE_FACTOR = 3  # a successful clock check older than 3 check intervals no longer counts
 
 
 @dataclass
@@ -176,6 +179,7 @@ class Position:
     target_price: Decimal
     exit_intent: ExitIntent | None
     exit_orders: int
+    metadata_sha256: str | None = None  # metadata version whose tick size froze stop/target (public sessions)
 
 
 @dataclass
@@ -211,6 +215,7 @@ class EngineState:
     metadata_fetched_us: int | None = None
     ref_price: RefPriceObs | None = None
     session_id: str | None = None
+    clock_checked_us: int | None = None  # last successful clock-offset check within the limit (forward sessions)
 
 
 class Recorder:
@@ -377,6 +382,19 @@ class Engine:
             rec.health("entry_block_cleared", block=block, **detail)
             self._notify(rec, "unblock", f"{block}:{rec.seq}", f"entry block cleared: {block}")
 
+    def _invalidate_quotes(self, st: EngineState, rec: Recorder, reason: str) -> None:
+        """The last quote no longer counts as fresh; a new observation must arrive before any decision uses one."""
+        if not st.health.quotes_fresh:
+            return
+        st.health.quotes_fresh = False
+        st.health.stale_since_us = st.clock_us
+        exposed = st.balances.btc_total > 0
+        if exposed:
+            st.health.unprotected_since_us = st.clock_us
+        rec.health("quotes_stale", stale_since=iso(st.clock_us), reason=reason, inventory_exposed=exposed)
+        if st.order is not None and st.order.purpose == "entry":
+            self._close_order(st, rec, "canceled", "quote_stale", None)
+
     def _fresh_quote(self, st: EngineState) -> QuoteObs | None:
         q = st.last_quote
         if q is None or not st.health.quotes_fresh:
@@ -476,6 +494,11 @@ class Engine:
         rec.health("feed_" + ev.kind, **detail)
         if ev.kind == "ws_disconnected":
             self._set_block(st, rec, BLOCK_FEED, True, reason=detail.get("reason"))
+            # Reconnecting is not recovery: quotes from before the disconnect never count as fresh, and entries
+            # stay blocked until the runner has fresh observations and has revalidated candle continuity.
+            self._set_block(st, rec, BLOCK_FEED_RECOVERY, True, reason="ws_disconnected")
+            st.health.recovery_signaled = False
+            self._invalidate_quotes(st, rec, "ws_disconnected")
             triggers.append("health:feed_disconnected")
         elif ev.kind == "ws_connected":
             self._set_block(st, rec, BLOCK_FEED, False)
@@ -487,7 +510,10 @@ class Engine:
             limit = self.cfg.clock_max_offset_us
             offset = int(detail.get("offset_us", 0))
             if limit is not None:
-                self._set_block(st, rec, BLOCK_CLOCK, abs(offset) > limit, offset_us=offset)
+                ok = abs(offset) <= limit
+                st.clock_checked_us = st.clock_us if ok else None
+                self._set_block(st, rec, BLOCK_CLOCK, not ok, offset_us=offset,
+                                reason=None if ok else "offset_exceeds_limit")
         elif ev.kind == "recovered":
             st.health.recovery_signaled = True
         elif ev.kind == "session_stop":
@@ -505,17 +531,15 @@ class Engine:
             else:
                 self._close_order(st, rec, "zero", "retired_on_restart", None)
         st.health.recovery_signaled = False
-        if st.health.quotes_fresh:
-            # a quote observed by a previous process is not a fresh observation of this session: flattening and
-            # every other decision waits for quotes received after the restart
-            st.health.quotes_fresh = False
-            st.health.stale_since_us = st.clock_us
-            if st.balances.btc_total > 0:
-                st.health.unprotected_since_us = st.clock_us
-            rec.health("quotes_stale", stale_since=iso(st.clock_us), reason="session_start",
-                       inventory_exposed=st.balances.btc_total > 0)
+        # a quote observed by a previous process is not a fresh observation of this session: flattening and
+        # every other decision waits for quotes received after the restart
+        self._invalidate_quotes(st, rec, "session_start")
         self._set_block(st, rec, BLOCK_FEED, True, reason="session_start")
         self._set_block(st, rec, BLOCK_RECOVERY, True, reason="session_start")
+        if self.cfg.clock_max_offset_us is not None:
+            # clock verification starts pending: only a successful server-time check within the limit clears it
+            st.clock_checked_us = None
+            self._set_block(st, rec, BLOCK_CLOCK, True, reason="clock_unverified")
         rec.health("session_start", session=ev.session_id, restart=ev.restart, retired_order=retired,
                    position=st.position.position_id if st.position else None)
         self._notify(rec, "session", ev.session_id, f"session {'restart' if ev.restart else 'start'} "
@@ -535,6 +559,11 @@ class Engine:
             st.risk.day_baseline = None
             rec.risk("day_rollover", previous_day=prev, day=day, timezone=cfg.day_timezone,
                      latches_preserved=list(st.risk.latches))
+
+        if (cfg.forward is not None and st.clock_checked_us is not None
+                and now - st.clock_checked_us > CLOCK_CHECK_STALE_FACTOR * cfg.forward.clock_check_s * US_PER_S):
+            st.clock_checked_us = None
+            self._set_block(st, rec, BLOCK_CLOCK, True, reason="clock_check_expired")
 
         q = st.last_quote
         if st.health.quotes_fresh and (q is None or now - q.recv_us > cfg.quote_max_age_us):
@@ -876,6 +905,7 @@ class Engine:
             position_id=position_id, candidate_id=o.candidate_id, opened_us=now, entry_price=price,
             entry_qty=amounts.btc_credit, stop_distance=d, stop_price=floor_to(price - d, rules.tick),
             target_price=ceil_to(price + TARGET_STOP_MULT * d, rules.tick), exit_intent=None, exit_orders=0,
+            metadata_sha256=st.metadata_hash,
         )
         rec.insert("positions", {
             "position_id": position_id, "candidate_id": o.candidate_id, "opened_us": now, "entry_price": price,
@@ -1010,10 +1040,11 @@ class Engine:
                         self._close_order(st, rec, "canceled", "risk_latch:" + latch, None)
                     triggers.append("halt")
 
-        if (BLOCK_RECOVERY in st.health.blocks and st.health.recovery_signaled and st.position is None
-                and st.order is None):
-            self._set_block(st, rec, BLOCK_RECOVERY, False, note="recovered; no tradable position or order")
-            rec.health("rearmed", session=st.session_id)
+        pending_recovery = [b for b in RECOVERY_BLOCKS if b in st.health.blocks]
+        if pending_recovery and st.health.recovery_signaled and st.position is None and st.order is None:
+            for b in pending_recovery:
+                self._set_block(st, rec, b, False, note="recovered; no tradable position or order")
+            rec.health("rearmed", session=st.session_id, cleared=pending_recovery)
         pos = st.position
         if pos is not None and pos.exit_intent is None and triggers:
             reason = min(triggers, key=_priority)

@@ -100,3 +100,40 @@ def test_daily_summary_is_written_once_per_local_day(tmp_path):
         assert daily[0]["text"].startswith("PAPER | PUBLIC DATA | FORWARD | MOCKED | DAILY")
     finally:
         h.close()
+
+
+def test_websockets_floor_matches_the_real_connector_arguments(tmp_path, monkeypatch):
+    """The declared minimum websockets release accepts every argument default_connect passes (review
+    regression: 13.x/14.x forward ping_interval to socket creation and raise TypeError)."""
+    import inspect
+    import tomllib
+
+    import websockets
+    import websockets.sync.client as client
+
+    from paperbot.config import ConfigError
+    from paperbot_net import ws
+
+    deps = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["dependencies"]
+    (spec,) = [d for d in deps if d.startswith("websockets")]
+    assert spec.startswith("websockets>=15.0,") and ws.MIN_WEBSOCKETS == (15, 0)
+    named = inspect.getfullargspec(client.connect)
+    assert set(ws.connect_kwargs(1.0)) <= set(named.args) | set(named.kwonlyargs)
+    ws.check_websockets()  # the installed release is supported
+
+    def old_connect(uri, *, sock=None, ssl=None, server_hostname=None, origin=None, extensions=None,
+                    subprotocols=None, additional_headers=None, user_agent_header=None, compression="deflate",
+                    open_timeout=10, close_timeout=10, max_size=2 ** 20, logger=None, create_connection=None,
+                    **kwargs):  # websockets 13.1 shape: extras go to socket creation
+        raise AssertionError("must not be called")
+
+    monkeypatch.setattr(client, "connect", old_connect)
+    monkeypatch.setattr(websockets, "__version__", "13.1")
+    with pytest.raises(ConfigError, match="ping_interval"):
+        ws.check_websockets()
+    from paperbot_net.runner import run_forward
+
+    state = tmp_path / "s.sqlite"
+    with pytest.raises(ConfigError):  # refused before any lock is taken or any state is created
+        run_forward(str(write_forward_config(tmp_path)), str(state), install_signals=False, log=lambda *_: None)
+    assert not state.exists()

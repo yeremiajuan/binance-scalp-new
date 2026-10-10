@@ -182,3 +182,26 @@ def test_rest_errors_are_never_success_and_reference_never_set_is_explicit():
 
 def test_kline_row_shape_matches_docs():
     assert len(kline_row(BARS[0])) == 12
+
+
+def test_server_weight_reading_expires_at_its_minute_boundary_and_throttling_recovers():
+    """A high X-MBX-USED-WEIGHT-1M reading blocks only the minute it was read in (review regression)."""
+    clock = Clock()
+    clock.t = 600 * 60 + 5  # 5 s into a minute
+    t = FakeTransport([ok({"serverTime": 1}, "3000"), ok({"serverTime": 2}, "7"), ok({"serverTime": 3}, "2999"),
+                       ok({"serverTime": 4}, "1"), ok({"serverTime": 5}, "1")])
+    rest = PublicRest("api.binance.com", t, monotonic=clock, wall=clock)  # budget 0.5 * 6000 = 3000
+    rest.get("time")  # reading 3000 in minute M
+    with pytest.raises(Throttled):
+        rest.get("time")  # same minute: 3000 + 1 > 3000, nothing sent
+    clock.t += 60  # minute M+1: the old reading no longer counts
+    assert rest.get("time") == {"serverTime": 2} and rest.used_weight == 7
+    clock.t += 60  # M+2: a fresh high reading throttles again within its own minute
+    assert rest.get("time") == {"serverTime": 3}
+    with pytest.raises(Throttled):
+        rest.get("klines", symbol="BTCUSDT", interval="1m")
+    clock.t += 60  # M+3 and M+4: recovered, every minute
+    assert rest.get("time") == {"serverTime": 4}
+    clock.t += 60
+    assert rest.get("time") == {"serverTime": 5}
+    assert len(t.urls) == 5

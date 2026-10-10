@@ -17,6 +17,10 @@ Normalization rules (documented in docs/DECISIONS.md, Phase 2):
   bars and the engine resets its indicators.
 * Heartbeats (local clock only) are sent when no other input was processed for ``heartbeat_ms`` so staleness,
   missing candles and timeouts are detected even when no message arrives.
+* Rearming (after a start, restart or reconnect) needs: warm-up/backfill done with no held bars and no missing
+  candle, the stream connected, a quote received after the (re)connection, and current metadata. After a reconnect
+  candle continuity is revalidated from REST before rearming. The clock check starts pending at every session
+  start and a failed check is retried with bounded backoff; the engine blocks entries until one succeeds.
 """
 
 from __future__ import annotations
@@ -26,7 +30,7 @@ from collections import Counter
 from dataclasses import dataclass
 from decimal import Decimal
 
-from .engine import BLOCK_FEED, BLOCK_RECOVERY, Engine
+from .engine import BLOCK_FEED, RECOVERY_BLOCKS, Engine
 from .events import InputError, RawEvent, canonical_json, parse_event
 from .normalize import (
     PayloadError,
@@ -45,6 +49,7 @@ from .timeutil import MINUTE_US, US_PER_MS, US_PER_S, parse_ts
 
 REF_FORWARD_US = 10 * US_PER_S  # forward an unchanged reference observation at most every 10 s
 MAX_HELD_BARS = 1000
+CLOCK_RETRY_INITIAL_US = 15 * US_PER_S  # a failed server-time check is retried after 15 s, doubling per failure
 
 
 @dataclass
@@ -74,6 +79,8 @@ class ForwardSession:
         self.backfill: tuple[int, int] | None = None  # (from_start_us, requested_at_us)
         self.ws_connected = False
         self.rest_down = False
+        self.time_failures = 0
+        self.time_retry_at: int | None = None
         self.stats: Counter = Counter()
         self.stopped = False
         self.stop_reason: str | None = None
@@ -173,6 +180,11 @@ class ForwardSession:
         if data.get("kind") == "ws_connected":
             self.ws_connected = True
             self.feed("ws_connected", now, conn=data.get("conn"))
+            expected = self._expected()
+            if self.warmup_done and self.backfill is None and expected is not None:
+                # bars may have closed while disconnected: revalidate continuity from REST before rearming
+                self.feed("continuity_check", now, from_bar=iso_us(expected))
+                self._request_backfill(expected, None, now)
         elif data.get("kind") == "ws_disconnected":
             self.ws_connected = False
             self.feed("ws_disconnected", now, conn=data.get("conn"), reason=data.get("reason"))
@@ -227,12 +239,14 @@ class ForwardSession:
             self._request_backfill(expected, start, now)
         self._flush(now)
 
-    def _request_backfill(self, expected: int, first_held: int, now: int) -> None:
+    def _request_backfill(self, expected: int, first_held: int | None, now: int) -> None:
         self.backfill = (expected, now)
         self.stats["backfill_requests"] += 1
-        self.rest_request("klines", {"symbol": "BTCUSDT", "interval": "1m", "startTime": expected // US_PER_MS,
-                                     "endTime": (first_held - 1) // US_PER_MS, "limit": 1000,
-                                     "purpose": "backfill"})
+        params = {"symbol": "BTCUSDT", "interval": "1m", "startTime": expected // US_PER_MS, "limit": 1000,
+                  "purpose": "backfill"}
+        if first_held is not None:
+            params["endTime"] = (first_held - 1) // US_PER_MS
+        self.rest_request("klines", params)
 
     def _flush(self, now: int, force: bool = False) -> None:
         if not self.warmup_done or (self.backfill is not None and not force):
@@ -285,6 +299,14 @@ class ForwardSession:
                               banned=bool(data.get("banned")))
             if name == "klines" and data.get("params", {}).get("purpose") in ("warmup", "backfill"):
                 pass  # the backfill timeout in tick() decides when to give up
+            if name == "time" and not (data.get("rate_limited") or data.get("banned")):
+                # the REST worker re-queues rate-limited calls itself; other failures are retried from here
+                self.time_failures += 1
+                delay = min(CLOCK_RETRY_INITIAL_US * 2 ** (self.time_failures - 1),
+                            self.fwd.clock_check_s * US_PER_S)
+                self.time_retry_at = now + delay
+                self.feed("clock_check_failed", now, error=data.get("error"), failures=self.time_failures,
+                          retry_in_s=delay // US_PER_S)
             return
         if self.rest_down:
             self.rest_down = False
@@ -292,6 +314,8 @@ class ForwardSession:
         body = data.get("parsed")
         try:
             if name == "time":
+                self.time_failures = 0
+                self.time_retry_at = None
                 offset = body["serverTime"] * US_PER_MS - (data["sent_us"] + now) // 2
                 self.feed("clock_offset", now, offset_us=offset, round_trip_us=now - data["sent_us"])
             elif name == "metadata":
@@ -320,14 +344,21 @@ class ForwardSession:
             self.backfill = None
             self.warmup_done = True
             self._flush(now, force=True)
+        if self.time_retry_at is not None and now >= self.time_retry_at:
+            self.time_retry_at = None
+            self.rest_request("time", {})
         if self.last_submit_us is None or now - self.last_submit_us >= self.fwd.heartbeat_ms * US_PER_MS:
             self.submit({"type": "heartbeat", "id": self._id("hb"), "recv": iso_us(now)})
         st = self.engine.state
-        if (BLOCK_RECOVERY in st.health.blocks and not st.health.recovery_signaled and self.warmup_done
-                and self.backfill is None and self.ws_connected and BLOCK_FEED not in st.health.blocks
+        # quotes_fresh is cleared by every disconnect and session start, so a fresh quote here was received after
+        # the latest (re)connection
+        if (any(b in st.health.blocks for b in RECOVERY_BLOCKS) and not st.health.recovery_signaled
+                and self.warmup_done and self.backfill is None and not self.held
+                and not st.health.candle_missing and self.ws_connected and BLOCK_FEED not in st.health.blocks
                 and st.metadata_hash is not None and st.health.quotes_fresh and st.last_quote is not None
                 and now - st.last_quote.recv_us <= self.engine.cfg.quote_max_age_us):
-            self.feed("recovered", now, note="warm-up/backfill done, stream connected, fresh quote, metadata")
+            self.feed("recovered", now, note="warm-up/backfill and continuity done, stream connected, quote "
+                      "received after (re)connection, metadata present")
 
     # ---------------------------------------------------------------- control
 

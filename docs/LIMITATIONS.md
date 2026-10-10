@@ -87,6 +87,13 @@
 - **Locks and Telegram.** Both locks are local (`flock`); there is no cross-machine coordination, and only Linux
   was exercised. Telegram delivery was tested against fakes only (no dry run against the real Bot API).
   Duplicates after ambiguous sends are possible by design.
+- **Recovery is conservative.** After every reconnect, entries wait for a REST continuity check and a quote
+  received after the reconnection; with an open position they wait until it is flattened. A breakout bar that
+  closes during that window is not traded. Entries also wait for a successful server-time check after every
+  start, so a REST outage at startup keeps entries blocked.
+- **Weight tracking uses the local minute.** The server's 1m weight window and the local wall-clock minute can
+  differ by the clock offset (at most 1 s while entries are allowed), so a reading near a boundary may be
+  counted in the wrong minute; the 50% budget leaves room for that.
 - **Market-data-only host.** With `data-api.binance.vision` as the REST host, executionRules and referencePrice
   are unavailable and entries stay blocked.
 - **Not implemented, as instructed.** No historical-data intake or evaluation campaign, no Testnet, no
@@ -117,4 +124,19 @@ Found and fixed while implementing Phase 2 (each has a regression test):
 - The daily summary fired immediately when started after 00:05 local time; it now starts from a baseline
   (`test_phase2_static.py::test_daily_summary_is_written_once_per_local_day`).
 
-No other Phase 2 defect is known. That is the implementer's assessment; Phase 2 needs independent review.
+The independent review of `87b130b` found five Phase 2 defects. All are fixed, with regression tests that fail
+against the `87b130b` source and pass now (`evidence/phase2/review_regressions.txt` runs them against both):
+
+| # | Finding | Fix | Regression tests |
+|---|---|---|---|
+| 1 (P1) | Reconnect cleared the feed block at once; a breakout bar right after reconnecting bought on a pre-disconnect quote | Disconnect invalidates quote freshness and raises `feed_recovery`; rearming needs a quote received after reconnecting and a REST continuity check | `test_forward.py::test_reconnect_never_enters_on_pre_disconnect_quotes[...]` (3 cases) |
+| 2 (P1) | A failed (HTTP 503) initial server-time check left entries allowed | Clock verification starts pending at every session start; only a successful check within the limit clears it; failures retried with backoff; a check older than 900 s expires | `test_forward.py::test_failed_initial_clock_check_blocks_entries_until_a_check_succeeds`, `test_clock_check_expires_without_a_recent_success` |
+| 3 (P1) | Reconciliation checked frozen stop/target with the latest tick size; a tick change (0.01 to 0.10) halted restart of an unchanged position | Position records its entry metadata version; reconciliation uses it (derived from inputs for older positions) | `test_forward.py::test_metadata_tick_change_keeps_an_open_position_reconciled_and_restartable` |
+| 4 (P1) | A server weight reading was kept across minutes; a reading of 3000 throttled every later minute | Readings count only in the minute they were received | `test_public_protocol.py::test_server_weight_reading_expires_at_its_minute_boundary_and_throttling_recovers` |
+| 5 (P2) | Declared `websockets>=13` but 13.x/14.x reject `ping_interval` in the sync client | `websockets>=15.0,<16`; the runner checks connector parameters before taking locks; real-connector tests run at exactly 15.0 | `test_phase2_static.py::test_websockets_floor_matches_the_real_connector_arguments`; `evidence/phase2/websockets_minimum.txt` |
+
+Tests changed by these fixes (behavior changed deliberately, not weakened): the startup and restart tests now also
+expect `clock_unsynced` until the first server-time answer; the reconnect-gap and failed-backfill tests connect
+without auto-answering the new continuity check, so they still exercise the gap backfill and the backfill timeout.
+
+No other Phase 2 defect is known. That is the implementer's assessment; Phase 2 needs independent re-review.

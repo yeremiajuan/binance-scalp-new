@@ -15,6 +15,8 @@ import threading
 import time
 from collections import deque
 
+from paperbot.config import ConfigError
+
 from .hosts import WS_HOSTS
 
 STREAMS = ("btcusdt@kline_1m", "btcusdt@bookTicker", "btcusdt@avgPrice", "btcusdt@referencePrice")
@@ -28,11 +30,33 @@ def stream_url(host: str, port: int | None = None, streams=STREAMS) -> str:
     return f"wss://{host}:{port or WS_HOSTS[host]}/stream?streams={'/'.join(streams)}"
 
 
+MIN_WEBSOCKETS = (15, 0)  # first release whose sync client accepts ping_interval (13.x/14.x raise TypeError)
+
+
+def connect_kwargs(open_timeout: float) -> dict:
+    # ping_interval=None: the server sends pings; the library answers them automatically.
+    return {"open_timeout": open_timeout, "ping_interval": None, "close_timeout": 2, "max_size": 2 ** 20}
+
+
+def check_websockets() -> None:
+    """Fail clearly (before any connection attempt) when the installed websockets cannot take our arguments."""
+    import inspect
+
+    import websockets
+    from websockets.sync.client import connect
+
+    parts = tuple(int(x) for x in websockets.__version__.split(".")[:2] if x.isdigit())
+    spec = inspect.getfullargspec(connect)  # named parameters only: older releases swallow extras in **kwargs
+    missing = set(connect_kwargs(1.0)) - set(spec.args) - set(spec.kwonlyargs)
+    if parts < MIN_WEBSOCKETS or missing:
+        raise ConfigError(f"installed websockets {websockets.__version__} is not supported: need >= "
+                           f"{'.'.join(map(str, MIN_WEBSOCKETS))} (sync client lacks {sorted(missing) or 'nothing'})")
+
+
 def default_connect(url: str, open_timeout: float):
     from websockets.sync.client import connect
 
-    # ping_interval=None: the server sends pings; the library answers them automatically.
-    return connect(url, open_timeout=open_timeout, ping_interval=None, close_timeout=2, max_size=2 ** 20)
+    return connect(url, **connect_kwargs(open_timeout))
 
 
 class StreamFeed(threading.Thread):

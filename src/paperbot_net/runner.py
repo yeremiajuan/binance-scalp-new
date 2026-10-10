@@ -31,7 +31,7 @@ from paperbot.storage import ProfileLock, StateLock
 from paperbot.timeutil import US_PER_S
 
 from .rest import PublicRest, RateLimited, RestError, Throttled, UrllibTransport
-from .ws import StreamFeed, stream_url
+from .ws import StreamFeed, check_websockets, stream_url
 
 
 def wall_iso() -> str:
@@ -288,6 +288,8 @@ def run_forward(config_path: str, state_path: str, *, run_seconds: float | None 
     if cfg.telegram is not None and cfg.telegram.enabled and notifier_factory is not None \
             and not os.environ.get(cfg.telegram.env_var):
         raise ValueError(f"telegram.enabled but environment variable {cfg.telegram.env_var} is not set")
+    if ws_connect is None:
+        check_websockets()  # the real connector: fail before taking locks, not at the first connection attempt
     stop_event = threading.Event()
     with StateLock(state_path) as lock, ProfileLock(fwd.profile_lock_dir, cfg.account_id):
         mocked = transport is not None or ws_url is not None or ws_connect is not None

@@ -188,13 +188,20 @@ P10. **Metadata versions.** exchangeInfo (BTCUSDT) and executionRules are fetche
 ## Health, recovery and restart
 
 P11. **Entry blocks.** `feed_disconnected`, `rest_unavailable` (429/418 or a metadata payload error),
-    `clock_unsynced` (`|server - local| > 1 s`, checked every 300 s) and `restart_recovery`. Any block cancels
+    `clock_unsynced`, `restart_recovery` and `feed_recovery`. `clock_unsynced` is raised at every session start
+    (clock unverified) and cleared only by a successful `/api/v3/time` check with `|server - local| <= 1 s`; it is
+    raised again when a check exceeds the limit or when no check has succeeded for 3 check intervals (900 s;
+    checks run every 300 s). A failed check (5xx/transport) is retried after 15 s, doubling up to 300 s. Any block cancels
     a pending buy and skips candidates as `entry_block:*`. With a position, `feed_disconnected` queues
     `health:feed_disconnected`; stale quotes, late/missing bars and gaps queue the Phase 1 health exits.
-P12. **Rearming.** `restart_recovery` is raised at every session start. The runner signals recovery only after
-    four conditions hold: warm-up/backfill done, stream connected, a fresh quote seen, and metadata present. The
-    engine then clears the block only when no position and no order remain, so recovered inventory is flattened
-    first.
+P12. **Rearming.** `restart_recovery` is raised at every session start and `feed_recovery` at every stream
+    disconnect. A disconnect (like a session start) also invalidates quote freshness: a quote received before it
+    never counts as fresh again. Reconnecting clears only `feed_disconnected`; on every connection after warm-up
+    the runner revalidates candle continuity with a REST klines request from the next expected bar, holding live
+    bars meanwhile (bars it returns are backfill: indicators only). The runner signals recovery only when
+    warm-up/backfill is done with no held bars and no missing candle, the stream is connected, a quote received
+    after the latest (re)connection is fresh, and metadata is present. The engine then clears the recovery blocks
+    only when no position and no order remain, so recovered inventory is flattened first.
 P13. **Forward restart policy** (separate from offline replay's exact-cursor resume):
     - lock both the state path and the profile, then reconcile (including rebuilding indicators from the
       persisted inputs);
@@ -210,7 +217,9 @@ P14. **Reconnect.** Bounded exponential backoff with jitter (1 s to 60 s, reset 
     `websockets` library.
 P15. **REST rate limits.** Local budget is `rest_weight_fraction` (0.5) of REQUEST_WEIGHT per minute, updated
     from exchangeInfo `rateLimits`. `X-MBX-USED-WEIGHT-1M` is tracked. 429 and 418 pause every request for
-    `Retry-After` (418 also marks a ban). 403, 5xx and transport errors are failures, never success.
+    `Retry-After` (418 also marks a ban). 403, 5xx and transport errors are failures, never success. A server
+    weight reading counts only in the local wall-clock minute it was received; the 1m counter restarts every
+    minute, so an old reading never blocks later minutes (and never prevents obtaining a new reading).
 
 ## Persistence, recording and controls
 
@@ -254,3 +263,10 @@ P23. **Telegram** is optional, off by default, and read-only.
 P24. **Config identity.** Path-like keys (`recordings_dir`, `profile_lock_dir`) and `[telegram]` are excluded from
     the canonical configuration. Normalization settings in `[forward]` are part of it, so changing them is a
     new version. The Phase 1 configuration hash is unchanged.
+P25. **Frozen protective prices keep their metadata version.** A position records the metadata version in force
+    at its entry fill (`metadata_sha256`). Reconciliation checks stop/target against that version's tick size
+    and cross-checks the version against the committed inputs (for positions recorded before the field existed,
+    the version is derived from the inputs). Later orders, including exits, use the current version.
+P26. **websockets >= 15.0.** The sync client accepts `ping_interval` from 15.0 (13.x/14.x pass it on to socket
+    creation and raise `TypeError`). `paperbot run` checks the installed release's connector parameters before
+    taking any lock; the evidence runs the real-connector tests at exactly 15.0.

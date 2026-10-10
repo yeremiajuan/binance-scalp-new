@@ -92,7 +92,7 @@ class MetadataEvent:
 
 
 FEED_KINDS = ("ws_connected", "ws_disconnected", "rest_unavailable", "rest_ok", "clock_offset", "recovered",
-              "backfill_failed", "session_stop")
+              "backfill_failed", "session_stop", "clock_check_failed", "continuity_check")
 
 
 @dataclass(frozen=True)

@@ -167,9 +167,11 @@ class Harness:
         self.session.start(now)
 
     def answer_all(self, now: int, fail: set[str] | None = None, errors: set[str] | None = None,
-                   **overrides) -> None:
-        """Answer queued REST requests; ``fail`` -> HTTP 429 (rate limited), ``errors`` -> HTTP 503."""
-        reqs, self.requests = self.requests, []
+                   only: set[str] | None = None, **overrides) -> None:
+        """Answer queued REST requests; ``fail`` -> HTTP 429 (rate limited), ``errors`` -> HTTP 503;
+        ``only`` limits the answers to those endpoint names (the rest stay queued)."""
+        reqs = [r for r in self.requests if only is None or r[0] in only]
+        self.requests = [r for r in self.requests if only is not None and r[0] not in only]
         for i, (name, params) in enumerate(reqs):
             t = now + i * 10 * MS
             if fail and name in fail:
@@ -185,8 +187,12 @@ class Harness:
                     "host": "api.binance.com", "fetched_us": t}
             self.session.handle(Item("rest", t, data))
 
-    def connect(self, now: int) -> None:
+    def connect(self, now: int, answer_continuity: bool = True) -> None:
+        """Stream connected. After warm-up the runner revalidates candle continuity from REST; by default the
+        fake answers that check 50 ms later."""
         self.session.handle(Item("ws_status", now, {"kind": "ws_connected", "conn": 1}))
+        if answer_continuity and any(n == "klines" and p.get("purpose") == "backfill" for n, p in self.requests):
+            self.answer_all(now + 50 * MS, only={"klines"})
 
     def disconnect(self, now: int, reason="test") -> None:
         self.session.handle(Item("ws_status", now, {"kind": "ws_disconnected", "conn": 1, "reason": reason}))
