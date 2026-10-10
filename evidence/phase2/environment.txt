@@ -1,18 +1,27 @@
 
 ### environment
 $ uname -srm
-Linux 6.18.44-fc-v80 x86_64
+Linux 6.18.44-fc-v114 x86_64
 [exit 0]
 $ python3 --version
 Python 3.13.16
 [exit 0]
 $ git rev-parse HEAD
-47dab56ae1be26fbffec8e2dbc6fe0a573b77656
+fdb85eb4b547b984ac78d9ed5d360d68e231dbeb
 [exit 0]
 $ git status --porcelain
-?? evidence/phase2/
+ D evidence/phase2/SHA256SUMS
+ D evidence/phase2/build.txt
+ D evidence/phase2/connectivity.txt
+ M evidence/phase2/environment.txt
+ D evidence/phase2/pytest.txt
+ D evidence/phase2/recorded_replay.txt
+ D evidence/phase2/ruff.txt
+ D evidence/phase2/static_scan.txt
+ D evidence/phase2/status_samples.txt
+ D evidence/phase2/validate_config.txt
 [exit 0]
-clean venv: /tmp/tmp.e2tO5a4PMH/venv
+clean venv: /tmp/tmp.ttfrrMXZBD/venv
 $ python --version
 Python 3.13.16
 [exit 0]

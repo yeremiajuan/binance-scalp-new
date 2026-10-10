@@ -21,5 +21,5 @@ time ('/api/v3/time', 1)
 
 ### HTTP methods used by the REST client
 $ grep -n method= src/paperbot_net/rest.py
-74:        req = urllib.request.Request(url, method="GET", headers={"User-Agent": "paperbot-paper/0.2 (public data)"})
+76:        req = urllib.request.Request(url, method="GET", headers={"User-Agent": "paperbot-paper/0.2 (public data)"})
 [exit 0]

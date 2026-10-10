@@ -1,4 +1,4 @@
-$ python -m build --outdir /tmp/tmp.e2tO5a4PMH/dist
+$ python -m build --outdir /tmp/tmp.ttfrrMXZBD/dist
 * Creating isolated environment: venv+pip...
 * Installing packages in isolated environment:
   - setuptools>=68
@@ -180,7 +180,7 @@ running install_egg_info
 Copying src/paperbot.egg-info to build/bdist.linux-x86_64/wheel/./paperbot-0.2.0-py3.13.egg-info
 running install_scripts
 creating build/bdist.linux-x86_64/wheel/paperbot-0.2.0.dist-info/WHEEL
-creating '/tmp/tmp.e2tO5a4PMH/dist/.tmp-rhezpfgz/paperbot-0.2.0-py3-none-any.whl' and adding 'build/bdist.linux-x86_64/wheel' to it
+creating '/tmp/tmp.ttfrrMXZBD/dist/.tmp-jo4opq07/paperbot-0.2.0-py3-none-any.whl' and adding 'build/bdist.linux-x86_64/wheel' to it
 adding 'paperbot/__init__.py'
 adding 'paperbot/__main__.py'
 adding 'paperbot/cli.py'
@@ -217,12 +217,12 @@ adding 'paperbot-0.2.0.dist-info/RECORD'
 removing build/bdist.linux-x86_64/wheel
 Successfully built paperbot-0.2.0.tar.gz and paperbot-0.2.0-py3-none-any.whl
 [exit 0]
-$ ls -l /tmp/tmp.e2tO5a4PMH/dist
-total 212
--rw-r--r-- 1 root root  93790 Oct  9 20:14 paperbot-0.2.0-py3-none-any.whl
--rw-r--r-- 1 root root 122676 Oct  9 20:14 paperbot-0.2.0.tar.gz
+$ ls -l /tmp/tmp.ttfrrMXZBD/dist
+total 224
+-rw-r--r-- 1 root root  96229 Oct 10 10:55 paperbot-0.2.0-py3-none-any.whl
+-rw-r--r-- 1 root root 127941 Oct 10 10:55 paperbot-0.2.0.tar.gz
 [exit 0]
-$ python -c import zipfile,glob; z=zipfile.ZipFile(glob.glob('/tmp/tmp.e2tO5a4PMH/dist/*.whl')[0]); print('\n'.join(n for n in z.namelist() if n.endswith('.py')))
+$ python -c import zipfile,glob; z=zipfile.ZipFile(glob.glob('/tmp/tmp.ttfrrMXZBD/dist/*.whl')[0]); print('\n'.join(n for n in z.namelist() if n.endswith('.py')))
 paperbot/__init__.py
 paperbot/__main__.py
 paperbot/cli.py

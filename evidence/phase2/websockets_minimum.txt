@@ -1,0 +1,30 @@
+
+### websockets 15.0 (declared minimum): real-connector tests
+$ /tmp/tmp.ttfrrMXZBD/ws15/bin/python -m pip show websockets
+Name: websockets
+Version: 15.0
+Summary: An implementation of the WebSocket Protocol (RFC 6455 & 7692)
+Home-page: https://github.com/python-websockets/websockets
+Author: 
+Author-email: Aymeric Augustin <aymeric.augustin@m4x.org>
+License: BSD-3-Clause
+Location: /tmp/tmp.ttfrrMXZBD/ws15/lib/python3.13/site-packages
+Requires: 
+Required-by: paperbot
+[exit 0]
+$ /tmp/tmp.ttfrrMXZBD/ws15/bin/python -m pytest -p no:cacheprovider -q tests/test_runner_e2e.py tests/test_phase2_static.py::test_websockets_floor_matches_the_real_connector_arguments
+....                                                                     [100%]
+4 passed in 14.38s
+[exit 0]
+
+### websockets 13.1 (below the minimum)
+$ connect('ws://127.0.0.1:9/', ping_interval=None, open_timeout=1)   # what 87b130b passed
+TypeError: create_connection() got an unexpected keyword argument 'ping_interval'
+$ PYTHONPATH=src python -c 'check_websockets()'   # this change: refused before any lock
+ConfigError: installed websockets 13.1 is not supported: need >= 15.0 (sync client lacks ['ping_interval'])
+
+### websockets 14.2 (below the minimum)
+$ connect('ws://127.0.0.1:9/', ping_interval=None, open_timeout=1)   # what 87b130b passed
+TypeError: create_connection() got an unexpected keyword argument 'ping_interval'
+$ PYTHONPATH=src python -c 'check_websockets()'   # this change: refused before any lock
+ConfigError: installed websockets 14.2 is not supported: need >= 15.0 (sync client lacks ['ping_interval'])

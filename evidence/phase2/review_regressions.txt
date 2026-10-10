@@ -1,0 +1,31 @@
+
+### regression tests against the reviewed source (87b130b): expected to FAIL
+$ PYTHONPATH=<87b130b>/src python -m pytest -p no:cacheprovider -rf tests/test_forward.py::test_reconnect_never_enters_on_pre_disconnect_quotes tests/test_forward.py::test_failed_initial_clock_check_blocks_entries_until_a_check_succeeds tests/test_forward.py::test_clock_check_expires_without_a_recent_success tests/test_forward.py::test_metadata_tick_change_keeps_an_open_position_reconciled_and_restartable tests/test_public_protocol.py::test_server_weight_reading_expires_at_its_minute_boundary_and_throttling_recovers tests/test_phase2_static.py::test_websockets_floor_matches_the_real_connector_arguments
+____ test_failed_initial_clock_check_blocks_entries_until_a_check_succeeds _____
+    def test_failed_initial_clock_check_blocks_entries_until_a_check_succeeds(h):
+FAILED tests/test_forward.py::test_reconnect_never_enters_on_pre_disconnect_quotes[continuity_answered_first]
+FAILED tests/test_forward.py::test_reconnect_never_enters_on_pre_disconnect_quotes[bar_held_until_continuity]
+FAILED tests/test_forward.py::test_reconnect_never_enters_on_pre_disconnect_quotes[engine_direct]
+FAILED tests/test_forward.py::test_failed_initial_clock_check_blocks_entries_until_a_check_succeeds
+FAILED tests/test_forward.py::test_clock_check_expires_without_a_recent_success
+FAILED tests/test_forward.py::test_metadata_tick_change_keeps_an_open_position_reconciled_and_restartable
+FAILED tests/test_public_protocol.py::test_server_weight_reading_expires_at_its_minute_boundary_and_throttling_recovers
+FAILED tests/test_phase2_static.py::test_websockets_floor_matches_the_real_connector_arguments
+8 failed in 8.33s
+[exit 1]
+
+### regression tests against this source: expected to pass
+$ python -m pytest -p no:cacheprovider -q -rA tests/test_forward.py::test_reconnect_never_enters_on_pre_disconnect_quotes tests/test_forward.py::test_failed_initial_clock_check_blocks_entries_until_a_check_succeeds tests/test_forward.py::test_clock_check_expires_without_a_recent_success tests/test_forward.py::test_metadata_tick_change_keeps_an_open_position_reconciled_and_restartable tests/test_public_protocol.py::test_server_weight_reading_expires_at_its_minute_boundary_and_throttling_recovers tests/test_phase2_static.py::test_websockets_floor_matches_the_real_connector_arguments
+........                                                                 [100%]
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED tests/test_forward.py::test_reconnect_never_enters_on_pre_disconnect_quotes[continuity_answered_first]
+PASSED tests/test_forward.py::test_reconnect_never_enters_on_pre_disconnect_quotes[bar_held_until_continuity]
+PASSED tests/test_forward.py::test_reconnect_never_enters_on_pre_disconnect_quotes[engine_direct]
+PASSED tests/test_forward.py::test_failed_initial_clock_check_blocks_entries_until_a_check_succeeds
+PASSED tests/test_forward.py::test_clock_check_expires_without_a_recent_success
+PASSED tests/test_forward.py::test_metadata_tick_change_keeps_an_open_position_reconciled_and_restartable
+PASSED tests/test_public_protocol.py::test_server_weight_reading_expires_at_its_minute_boundary_and_throttling_recovers
+PASSED tests/test_phase2_static.py::test_websockets_floor_matches_the_real_connector_arguments
+8 passed in 9.41s
+[exit 0]
