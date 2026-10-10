@@ -1,6 +1,6 @@
 # Verification summary: LINUX RUN (all checks passed) - NOT a Windows validation
 
-- date (UTC): 2026-10-10T13:14:39+00:00
+- date (UTC): 2026-10-10T14:09:56+00:00
 - platform: Linux-6.18.44-fc-v114-x86_64-with-glibc2.39
 - python: 3.13.16
 
@@ -14,5 +14,6 @@
 | package build | `build.txt` | PASS |
 | validate configurations | `validate_config.txt` | PASS |
 | synthetic replay determinism | `synthetic_replay.txt` | PASS |
+| timezone data without a system database (tzdata package) | `timezone.txt` | PASS |
 | mocked recorded-replay comparison | `recorded_replay.txt` | PASS |
 | ownership, controls and shutdown drill | `ownership_drill.txt` | PASS |

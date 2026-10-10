@@ -1,5 +1,5 @@
-$ /tmp/pbverify-ecy0wr9l/venv/bin/python scripts/phase2_mocked_demo.py /tmp/pbverify-ecy0wr9l/recorded
-mocked forward session: /tmp/pbverify-ecy0wr9l/recorded/fwd.sqlite
+$ /tmp/pbverify-xbotr7kg/venv/bin/python scripts/phase2_mocked_demo.py /tmp/pbverify-xbotr7kg/recorded
+mocked forward session: /tmp/pbverify-xbotr7kg/recorded/fwd.sqlite
 export: {'events': 337, 'controls': 2, 'sha256': '83b07e2ab530c27acacbe028d530e9e42cfca93856be2c9e2372c6a15becef9a'}
 replay: {'events': 337, 'controls': 2, 'cursor': 337, 'provenance': 'MOCKED'}
 

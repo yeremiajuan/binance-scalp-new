@@ -1,0 +1,55 @@
+$ /tmp/pbverify-xbotr7kg/venv/bin/python -c "import zoneinfo, importlib.metadata as m; print('default TZPATH', zoneinfo.TZPATH); print('tzdata', m.version('tzdata'))"
+default TZPATH ('/usr/share/zoneinfo', '/usr/lib/zoneinfo', '/usr/share/lib/zoneinfo', '/etc/zoneinfo')
+tzdata 2026.5
+[exit 0]
+
+$ /tmp/pbverify-xbotr7kg/venv/bin/python -c "import zoneinfo; print('TZPATH', zoneinfo.TZPATH); print(zoneinfo.ZoneInfo('Asia/Jakarta'))"
+TZPATH ()
+Asia/Jakarta
+[exit 0]
+
+$ /tmp/pbverify-xbotr7kg/venv/bin/python -m paperbot validate-config config/forward.toml
+PAPER | PUBLIC DATA | configuration OK | account paper-forward-1 | BTCUSDT | B20-T5-v1
+config_sha256 ec9203a1a3fe129ecf541dd6a7a579b46feb006f6c0ba02ea768488c35f0ea7d
+public market data: REST https://api.binance.com (GET only), WebSocket wss://data-stream.binance.vision; no credentials
+telegram: disabled
+live mode: not implemented (rejected)
+[exit 0]
+
+$ /tmp/pbverify-xbotr7kg/venv/bin/python -m paperbot validate-config config/paper.toml
+PAPER | SYNTHETIC | configuration OK | account paper-synthetic-demo | BTCUSDT | B20-T5-v1
+config_sha256 3f9aba57ef97c6dab422298e5dbb26bdb9f98469e0b79baf8e4ea7c3c4e46d0b
+metadata SYNTHETIC retrieved 2026-10-09T04:46:08.396Z sha256 d1f5ef2bbeb9007e9d5456717d9cc0d12a5baf94fa81abfb9ba817427ac299ef
+live mode: not implemented (rejected)
+[exit 0]
+
+$ /tmp/pbverify-xbotr7kg/venv/bin/python -m paperbot replay --config config/paper.toml --input fixtures/synthetic_demo.jsonl --state /tmp/pbverify-xbotr7kg/replay-tzdata-package.sqlite --quiet
+PAPER | SYNTHETIC | replay: processed 13230 events, cursor 13230/13230 | input sha256 492505935743a253ad4ab469281d37cd16b1bb14575dbd4004b97ad61d423f9a | dispositions {'accepted': 13215, 'rejected': 14, 'duplicate': 1}
+[exit 0]
+
+$ /tmp/pbverify-xbotr7kg/venv/bin/python scripts/compare_states.py /tmp/pbverify-xbotr7kg/replay-a.sqlite /tmp/pbverify-xbotr7kg/replay-tzdata-package.sqlite
+table              rows A   rows B  match  sha256(A)[:16]
+balances                2        2  yes    1d2185472a8b2f8c
+candidates             17       17  yes    0bd1bfa3e9125c5a
+control_events          0        0  yes    4f53cda18c2baa0c
+cursor                  1        1  yes    6eabde9f8e281b79
+engine_state            1        1  yes    5d8ec76a39bff0a4
+exit_intents            5        5  yes    b47e756b3ec4cfea
+fills                  12       12  yes    3b35adc0544932cd
+health_events          18       18  yes    bfc0f8c0b89322f4
+input_log           13230    13230  yes    f58e6fe4eb976b8e
+input_payloads          0        0  yes    4f53cda18c2baa0c
+ledger                 47       47  yes    46c10d102ef24a0d
+manifest                0        0  yes    4f53cda18c2baa0c
+meta                   17       17  yes    7c48b6af01211470
+metadata_versions        0        0  yes    4f53cda18c2baa0c
+orders                 13       13  yes    38f9f32add90f5ac
+outbox                  0        0  yes    4f53cda18c2baa0c
+positions               6        6  yes    b29de37e41d96df5
+risk_events             5        5  yes    2e1dfaf108c65d63
+sessions                0        0  yes    4f53cda18c2baa0c
+source_events       13229    13229  yes    7dc4cb48faa48c8d
+sqlite_sequence         3        3  yes    40bd627ea4dd61b5
+IDENTICAL
+[exit 0]
+

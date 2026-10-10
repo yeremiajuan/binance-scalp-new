@@ -1,4 +1,4 @@
-$ /tmp/pbverify-ecy0wr9l/venv/bin/python -m paperbot validate-config config/forward.toml
+$ /tmp/pbverify-xbotr7kg/venv/bin/python -m paperbot validate-config config/forward.toml
 PAPER | PUBLIC DATA | configuration OK | account paper-forward-1 | BTCUSDT | B20-T5-v1
 config_sha256 ec9203a1a3fe129ecf541dd6a7a579b46feb006f6c0ba02ea768488c35f0ea7d
 public market data: REST https://api.binance.com (GET only), WebSocket wss://data-stream.binance.vision; no credentials
@@ -6,7 +6,7 @@ telegram: disabled
 live mode: not implemented (rejected)
 [exit 0]
 
-$ /tmp/pbverify-ecy0wr9l/venv/bin/python -m paperbot validate-config config/paper.toml
+$ /tmp/pbverify-xbotr7kg/venv/bin/python -m paperbot validate-config config/paper.toml
 PAPER | SYNTHETIC | configuration OK | account paper-synthetic-demo | BTCUSDT | B20-T5-v1
 config_sha256 3f9aba57ef97c6dab422298e5dbb26bdb9f98469e0b79baf8e4ea7c3c4e46d0b
 metadata SYNTHETIC retrieved 2026-10-09T04:46:08.396Z sha256 d1f5ef2bbeb9007e9d5456717d9cc0d12a5baf94fa81abfb9ba817427ac299ef

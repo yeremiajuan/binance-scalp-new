@@ -1,18 +1,18 @@
-$ /tmp/pbverify-ecy0wr9l/venv/bin/python scripts/make_demo_fixture.py /tmp/pbverify-ecy0wr9l/regenerated.jsonl
-wrote /tmp/pbverify-ecy0wr9l/regenerated.jsonl (13230 events)
+$ /tmp/pbverify-xbotr7kg/venv/bin/python scripts/make_demo_fixture.py /tmp/pbverify-xbotr7kg/regenerated.jsonl
+wrote /tmp/pbverify-xbotr7kg/regenerated.jsonl (13230 events)
 [exit 0]
 
 fixture regenerates byte-for-byte (LF line endings kept): True
 
-$ /tmp/pbverify-ecy0wr9l/venv/bin/python -m paperbot replay --config config/paper.toml --input fixtures/synthetic_demo.jsonl --state /tmp/pbverify-ecy0wr9l/replay-a.sqlite --quiet
+$ /tmp/pbverify-xbotr7kg/venv/bin/python -m paperbot replay --config config/paper.toml --input fixtures/synthetic_demo.jsonl --state /tmp/pbverify-xbotr7kg/replay-a.sqlite --quiet
 PAPER | SYNTHETIC | replay: processed 13230 events, cursor 13230/13230 | input sha256 492505935743a253ad4ab469281d37cd16b1bb14575dbd4004b97ad61d423f9a | dispositions {'accepted': 13215, 'rejected': 14, 'duplicate': 1}
 [exit 0]
 
-$ /tmp/pbverify-ecy0wr9l/venv/bin/python -m paperbot replay --config config/paper.toml --input fixtures/synthetic_demo.jsonl --state /tmp/pbverify-ecy0wr9l/replay-b.sqlite --quiet
+$ /tmp/pbverify-xbotr7kg/venv/bin/python -m paperbot replay --config config/paper.toml --input fixtures/synthetic_demo.jsonl --state /tmp/pbverify-xbotr7kg/replay-b.sqlite --quiet
 PAPER | SYNTHETIC | replay: processed 13230 events, cursor 13230/13230 | input sha256 492505935743a253ad4ab469281d37cd16b1bb14575dbd4004b97ad61d423f9a | dispositions {'accepted': 13215, 'rejected': 14, 'duplicate': 1}
 [exit 0]
 
-$ /tmp/pbverify-ecy0wr9l/venv/bin/python scripts/compare_states.py /tmp/pbverify-ecy0wr9l/replay-a.sqlite /tmp/pbverify-ecy0wr9l/replay-b.sqlite
+$ /tmp/pbverify-xbotr7kg/venv/bin/python scripts/compare_states.py /tmp/pbverify-xbotr7kg/replay-a.sqlite /tmp/pbverify-xbotr7kg/replay-b.sqlite
 table              rows A   rows B  match  sha256(A)[:16]
 balances                2        2  yes    1d2185472a8b2f8c
 candidates             17       17  yes    0bd1bfa3e9125c5a
@@ -38,7 +38,7 @@ sqlite_sequence         3        3  yes    40bd627ea4dd61b5
 IDENTICAL
 [exit 0]
 
-$ /tmp/pbverify-ecy0wr9l/venv/bin/python -m paperbot report --state /tmp/pbverify-ecy0wr9l/replay-a.sqlite
+$ /tmp/pbverify-xbotr7kg/venv/bin/python -m paperbot report --state /tmp/pbverify-xbotr7kg/replay-a.sqlite
 PAPER | SYNTHETIC | BTCUSDT | B20-T5-v1 | account paper-synthetic-demo
 cursor 13230/13230 · clock 2026-10-01T18:54:00.500Z · reconciliation OK
 config 3f9aba57ef97c6da · input 492505935743a253 · metadata SYNTHETIC d1f5ef2bbeb9007e (retrieved 2026-10-09T04:46:08.396Z)
