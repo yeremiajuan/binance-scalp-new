@@ -12,6 +12,9 @@ Files written:
                            the original test on this source (isolates the fixed-window test from the runtime fix),
                            and the wall-time stale-detection measurement on both sources
   regression_tests.txt     the new/rewritten tests on this source (PASS) and on the reviewed source (FAIL)
+  owner_turn_tests.txt     review of fca062e: tests/test_owner_turn.py (lag applied before the input; held-candle
+                           timestamps after a forced final chunk) on --reviewed-turn (fca062e's behavior with
+                           owner_turn extracted, expected FAIL) and on this source (PASS), under the same emulation
   pytest.txt, ruff.txt, build.txt, recorded_replay.txt   full suite, lint, package build, mocked replay comparison
 """
 
@@ -83,6 +86,7 @@ def main() -> int:
     ap.add_argument("--reviewed", default="bd43c0a")
     ap.add_argument("--out", type=Path, default=ROOT / "evidence" / "slow-persistence")
     ap.add_argument("--delay", type=float, default=0.016)
+    ap.add_argument("--reviewed-turn", default="1f2c3f1")
     args = ap.parse_args()
     out: Path = args.out
     out.mkdir(parents=True, exist_ok=True)
@@ -95,6 +99,11 @@ def main() -> int:
     archive = subprocess.run(["git", "archive", args.reviewed, "src", "tests"], cwd=ROOT, capture_output=True,
                              check=True).stdout
     subprocess.run(["tar", "-x", "-C", str(reviewed)], input=archive, check=True)
+    reviewed_turn = work / "reviewed-turn"
+    reviewed_turn.mkdir()
+    archive = subprocess.run(["git", "archive", args.reviewed_turn, "src"], cwd=ROOT, capture_output=True,
+                             check=True).stdout
+    subprocess.run(["tar", "-x", "-C", str(reviewed_turn)], input=archive, check=True)
     (work / "plugin").mkdir()
     (work / "plugin" / "slow_disk_plugin.py").write_text(PLUGIN, encoding="utf-8")
     pin = ["taskset", "-c", "0"] if shutil.which("taskset") else []
@@ -158,6 +167,13 @@ def main() -> int:
             {**emu, "PYTHONPATH": str(ROOT / "src")}, "this source under VPS emulation (expected: PASS)")
         run("regression_tests.txt", pin + [PY, "-m", "pytest", "-q", "-rf", "-p", "no:cacheprovider", *tests],
             {**emu, "PYTHONPATH": str(reviewed / "src")}, "reviewed source, same tests and emulation (expected: FAIL)")
+        turn_tests = ["tests/test_owner_turn.py", "tests/test_slow_persistence.py", "tests/test_runner_e2e.py"]
+        run("owner_turn_tests.txt", pin + [PY, "-m", "pytest", "-v", "-p", "no:cacheprovider", *turn_tests],
+            {**emu, "PYTHONPATH": str(ROOT / "src")}, "this source under VPS emulation (expected: PASS)")
+        run("owner_turn_tests.txt", pin + [PY, "-m", "pytest", "-q", "-rf", "-p", "no:cacheprovider",
+                                           "tests/test_owner_turn.py"],
+            {**emu, "PYTHONPATH": str(reviewed_turn / "src")},
+            f"{args.reviewed_turn} (fca062e behavior, owner_turn extracted) (expected: 3 FAIL, exits test passes)")
     finally:
         if burner is not None:
             burner.kill()
