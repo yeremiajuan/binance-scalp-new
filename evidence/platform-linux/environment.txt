@@ -1,0 +1,54 @@
+### clean virtual environment: /tmp/pbverify-ecy0wr9l/venv
+$ /tmp/pbverify-ecy0wr9l/venv/bin/python -m pip install -q --upgrade pip
+[exit 0]
+
+$ /tmp/pbverify-ecy0wr9l/venv/bin/python -m pip install -q -e /home/user/binance-scalp-new[test]
+[exit 0]
+
+### facts
+{
+  "utc_now": "2026-10-10T13:05:43+00:00",
+  "platform": "Linux-6.18.44-fc-v114-x86_64-with-glibc2.39",
+  "windows": null,
+  "machine": "x86_64",
+  "python_driver": "3.13.16 (main, Oct  1 2026, 15:40:24) [GCC 13.3.0]",
+  "python_driver_path": "/usr/bin/python3",
+  "repo": "/home/user/binance-scalp-new",
+  "repo_under_onedrive": false,
+  "LOCALAPPDATA": null,
+  "disk_free_gb": 31.9,
+  "stdout_encoding": "utf-8"
+}
+
+$ git rev-parse HEAD
+3a6e0fc57906ff51fae103860bf138c4310f6784
+[exit 0]
+
+$ git status --porcelain
+?? evidence/platform-linux/
+[exit 0]
+
+$ git config --get core.autocrlf
+[exit 1]
+
+$ uname -srm
+Linux 6.18.44-fc-v114 x86_64
+[exit 0]
+
+$ /tmp/pbverify-ecy0wr9l/venv/bin/python --version
+Python 3.13.16
+[exit 0]
+
+$ /tmp/pbverify-ecy0wr9l/venv/bin/python -m pip freeze --exclude-editable
+build==1.6.1
+filelock==4.1.0
+iniconfig==2.3.1
+packaging==26.3
+pluggy==1.6.0
+Pygments==2.21.0
+pyproject_hooks==1.3.3
+pytest==9.1.1
+ruff==0.17.0
+websockets==15.0.1
+[exit 0]
+

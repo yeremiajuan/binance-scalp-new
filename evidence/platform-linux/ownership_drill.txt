@@ -1,0 +1,232 @@
+$ /tmp/pbverify-ecy0wr9l/venv/bin/python /home/user/binance-scalp-new/scripts/verify_windows.py --drill /tmp/pbverify-ecy0wr9l/drill
+MOCKED public data (local server ws://127.0.0.1:36197); account verify-2ac3f2f2; state /tmp/pbverify-ecy0wr9l/drill/drill.sqlite
+per-user control dir: /root/.local/state/paperbot/control
+
+### 1. owner A starts and answers on the authenticated local control channel
+[PASS] owner A ready
+control endpoint: AF_UNIX /root/.local/state/paperbot/control/c62a775aa9634201fcb6e45a.sock
+[PASS] Linux uses a Unix socket
+
+### 2. read-only status and positions while the owner runs
+$ paperbot status --state /tmp/pbverify-ecy0wr9l/drill/drill.sqlite
+PAPER | PUBLIC DATA | FORWARD | MOCKED | BTCUSDT | B20-T5-v1 | account verify-2ac3f2f2
+cursor 313/0 · clock 2026-10-10T13:14:32.563Z · reconciliation OK
+config 682a55a348a36001 · input n/a · metadata PUBLIC (fetched, versioned)
+cash 1000 free + 0 locked USDT · BTC 0 (sellable 0, dust 0)
+mark bid 61814 age 54886us fresh · conservative equity 1000 · exposure 0
+realized net 0 · unrealized net (conservative) 0 · fees 0 USDT value
+latches none
+feed: stream connected · quotes fresh (mark age 54886us) · last 1m bar 2026-10-10T13:13:00.000Z · candle missing False
+entry blocks: none · recovery signaled True · metadata cfd321ada3c2 age 1s · clock checked 1s ago
+queued exit: none · pending order: none · unprotected exposure (cumulative) 0s · outbox {'pending': 7}
+[exit 0]
+[PASS] status
+$ paperbot positions --state /tmp/pbverify-ecy0wr9l/drill/drill.sqlite
+PAPER | PUBLIC DATA | FORWARD | MOCKED | positions | clock 2026-10-10T13:14:33.014Z
+no open position
+queued exit: none · pending order: none
+inventory 0 BTC (sellable 0, dust 0, dust basis 0) · bid 61814 age 0us fresh · liquidation value 0
+[exit 0]
+[PASS] positions
+
+### 3. competing owners and path aliases are refused
+$ paperbot run --config /tmp/pbverify-ecy0wr9l/drill/forward.toml --state /tmp/pbverify-ecy0wr9l/drill/drill.sqlite --run-seconds 5
+PAPER | LOCKED: state /tmp/pbverify-ecy0wr9l/drill/drill.sqlite is locked by another process; refusing to mutate it
+[exit 3]
+[PASS] second owner refused for /tmp/pbverify-ecy0wr9l/drill/drill.sqlite
+$ paperbot run --config /tmp/pbverify-ecy0wr9l/drill/forward.toml --state /tmp/pbverify-ecy0wr9l/drill/sub/../drill.sqlite --run-seconds 5
+PAPER | LOCKED: state /tmp/pbverify-ecy0wr9l/drill/drill.sqlite is locked by another process; refusing to mutate it
+[exit 3]
+[PASS] second owner refused for /tmp/pbverify-ecy0wr9l/drill/sub/../drill.sqlite
+$ paperbot run --config /tmp/pbverify-ecy0wr9l/drill/forward.toml --state /tmp/pbverify-ecy0wr9l/drill/dir-link/drill.sqlite --run-seconds 5
+PAPER | LOCKED: state /tmp/pbverify-ecy0wr9l/drill/drill.sqlite is locked by another process; refusing to mutate it
+[exit 3]
+[PASS] second owner refused for /tmp/pbverify-ecy0wr9l/drill/dir-link/drill.sqlite
+$ paperbot run --config /tmp/pbverify-ecy0wr9l/drill/forward.toml --state /tmp/pbverify-ecy0wr9l/drill/other.sqlite --run-seconds 5
+PAPER | LOCKED: paper account 'verify-2ac3f2f2' is already owned by another process (profile lock /root/.local/state/paperbot/locks/account-0ce5cfadcabe6f060f183a66.lock)
+[exit 3]
+[PASS] same account on another state path refused (profile lock)
+
+### 4. per-user files and their access control
+/root/.local/state/paperbot/control: mode 0o700
+[PASS] control is private
+/root/.local/state/paperbot/control/c62a775aa9634201fcb6e45a.json: mode 0o600
+[PASS] c62a775aa9634201fcb6e45a.json is private
+/root/.local/state/paperbot/locks: mode 0o700
+[PASS] locks is private
+
+### 5. kill and reset are routed through the running owner; a client without the key is refused
+$ paperbot kill --state /tmp/pbverify-ecy0wr9l/drill/drill.sqlite --reason verification drill
+PAPER | manual_kill latched (audited; routed to the active forward runner: manual_kill latched; effects apply at the next input (<= heartbeat)). Pending entries are canceled and tradable inventory exits at the next trustworthy observation.
+[exit 0]
+[PASS] kill routed
+$ paperbot reset --state /tmp/pbverify-ecy0wr9l/drill/drill.sqlite --latch manual_kill --reason drill reviewed --confirm
+PAPER | manual_kill reset (audited; routed to the active forward runner: manual_kill reset (audited)). History is preserved; no implicit resume of other latches.
+[exit 0]
+[PASS] reset routed
+unauthenticated client: AuthenticationError: digest sent was rejected
+[PASS] client with a wrong key refused
+
+### 6. graceful stop by console signal (Ctrl+Break on Windows, SIGINT on Linux)
+[PASS] owner A exited 0 after the signal
+[PASS] session stop reason recorded
+$ paperbot report --state /tmp/pbverify-ecy0wr9l/drill/drill.sqlite
+PAPER | PUBLIC DATA | FORWARD | MOCKED | BTCUSDT | B20-T5-v1 | account verify-2ac3f2f2
+cursor 319/0 · clock 2026-10-10T13:14:35.429Z · reconciliation OK
+config 682a55a348a36001 · input n/a · metadata PUBLIC (fetched, versioned)
+cash 1000 free + 0 locked USDT · BTC 0 (sellable 0, dust 0)
+mark bid 61814 age 402564us fresh · conservative equity 1000 · exposure 0
+realized net 0 · unrealized net (conservative) 0 · fees 0 USDT value
+latches none
+feed: stream connected · quotes fresh (mark age 402564us) · last 1m bar 2026-10-10T13:13:00.000Z · candle missing False
+entry blocks: feed_disconnected · recovery signaled True · metadata cfd321ada3c2 age 4s · clock checked 4s ago
+queued exit: none · pending order: none · unprotected exposure (cumulative) 0s · outbox {'pending': 8}
+
+MOCKED: public-format test data from fake servers/transports, not real market observations. PAPER | PUBLIC DATA: simulated paper fills against recorded public Binance best bid/ask observations. No order was sent to any exchange. Simulated fills (including fill-time resizing) are not achievable real executions: no matching engine, queue position, hidden liquidity or production fill guarantee is modeled. Live trading is not implemented. Results are not evidence of a trading edge.
+
+== Provenance ==
+  account_id: verify-2ac3f2f2
+  schema_version: 2
+  config_sha256: 682a55a348a36001df53ae0b1fad2be2e3c23bb01c699202606e3db5daf2a664
+  metadata_sha256: versioned (see metadata_versions)
+  metadata_label: PUBLIC (fetched, versioned)
+  metadata_retrieved_at: per version
+  input_path: forward session (normalized inputs in input_payloads)
+  input_sha256: n/a
+  input_events: 0
+  config: {"account": {"starting_btc": "0", "starting_usdt": "1000"}, "execution": {"buy_limit_cushion_bps": "5", "candle_max_lateness_ms": 5000, "latency_ms": 250, "max_entry_drift_atr": "0.25", "max_spread_bps": "5", "participation_fraction": "0.1", "quote_max_age_ms": 2000, "reference_max_age_ms": 120000, "sell_limit_cushion_bps": "50", "signal_expiry_ms": 5000, "slippage_bps": "1"}, "fees": {"buy_fee_asset": "BTC", "buy_fee_bps": "10", "sell_fee_bps": "10"}, "forward": {"backfill_timeout_s": 30, "clock_check_s": 300, "clock_max_offset_ms": 1000, "daily_summary_local": "00:05", "heartbeat_ms": 500, "metadata_max_age_s": 5400, "metadata_refresh_s": 3600, "quote_sample_ms": 500, "reconnect_initial_ms": 100, "reconnect_max_ms": 500, "reference_refresh_s": 30, "rest_host": "api.binance.com", "rest_timeout_s": 10, "rest_weight_fraction": "0.5", "warmup_bars": 300, "ws_host": "data-stream.binance.vision", "ws_silence_s": 30}, "risk": {"daily_loss_fraction": "0.01", "day_timezone": "Asia/Jakarta", "drawdown_fraction": "0.03", "max_exposure_fraction": "0.2", "risk_per_entry_fraction": "0.001"}, "run": {"account_id": "verify-2ac3f2f2", "mode": "paper", "strategy": "B20-T5-v1", "symbol": "BTCUSDT"}}
+  input dispositions: {'accepted': 319}
+
+== P&L (USDT) ==
+  starting_usdt: 1000
+  realized_net: 0
+  realized_execution_gross: 0
+  realized_entry_fees_attributed: 0
+  realized_exit_fees: 0
+  unrealized_net_conservative: 0
+  unrealized_execution_gross_at_bid: 0
+  fees_usdt_value: 0
+  fees by native asset: {}
+  identity starting+realized+unrealized = cash+liquidation: 1000 = 1000 -> True
+  inventory: total 0 BTC, basis 0, dust 0 BTC (basis 0, bid mark 0, liquidation value 0)
+
+== Candidates (11, submitted 0) ==
+  skip reasons: {'backfill_no_retroactive_entry': 11}
+  2026-10-10T09:00:00.000Z (2026-10-10T16:00:00.000+07:00) skipped   backfill_no_retroactive_entry close=60300 H=60205 atr=102.0089325487~ qty=None limit=None
+  2026-10-10T09:25:00.000Z (2026-10-10T16:25:00.000+07:00) skipped   backfill_no_retroactive_entry close=60450 H=60355 atr=102.2873175769~ qty=None limit=None
+  2026-10-10T09:50:00.000Z (2026-10-10T16:50:00.000+07:00) skipped   backfill_no_retroactive_entry close=60600 H=60505 atr=102.330972054~ qty=None limit=None
+  2026-10-10T10:15:00.000Z (2026-10-10T17:15:00.000+07:00) skipped   backfill_no_retroactive_entry close=60750 H=60655 atr=102.3378176569~ qty=None limit=None
+  2026-10-10T10:40:00.000Z (2026-10-10T17:40:00.000+07:00) skipped   backfill_no_retroactive_entry close=60900 H=60805 atr=102.3388911385~ qty=None limit=None
+  2026-10-10T11:05:00.000Z (2026-10-10T18:05:00.000+07:00) skipped   backfill_no_retroactive_entry close=61050 H=60955 atr=102.3390594748~ qty=None limit=None
+  2026-10-10T11:30:00.000Z (2026-10-10T18:30:00.000+07:00) skipped   backfill_no_retroactive_entry close=61200 H=61105 atr=102.3390858721~ qty=None limit=None
+  2026-10-10T11:55:00.000Z (2026-10-10T18:55:00.000+07:00) skipped   backfill_no_retroactive_entry close=61350 H=61255 atr=102.3390900116~ qty=None limit=None
+  2026-10-10T12:20:00.000Z (2026-10-10T19:20:00.000+07:00) skipped   backfill_no_retroactive_entry close=61500 H=61405 atr=102.3390906607~ qty=None limit=None
+  2026-10-10T12:45:00.000Z (2026-10-10T19:45:00.000+07:00) skipped   backfill_no_retroactive_entry close=61650 H=61555 atr=102.3390907625~ qty=None limit=None
+  2026-10-10T13:10:00.000Z (2026-10-10T20:10:00.000+07:00) skipped   backfill_no_retroactive_entry close=61800 H=61705 atr=102.3390907784~ qty=None limit=None
+
+== Orders {} ==
+
+== Fills ==
+
+== Positions ==
+
+== Risk ==
+  latches none · day 2026-10-10 baseline 1000 (pending False) · HWM 1000
+  2026-10-10T13:14:30.973Z (2026-10-10T20:14:30.973+07:00) day_rollover {"day": "2026-10-10", "latches_preserved": [], "previous_day": null, "timezone": "Asia/Jakarta"}
+  2026-10-10T13:14:31.001Z (2026-10-10T20:14:31.001+07:00) day_baseline_set {"day": "2026-10-10", "equity": "1000", "mark_quote": "bt:10001"}
+  2026-10-10T13:14:31.001Z (2026-10-10T20:14:31.001+07:00) hwm_set {"equity": "1000", "mark_quote": "bt:10001"}
+  CONTROL kill manual_kill at cursor 318 wall 2026-10-10T13:14:35.044+00:00: verification drill
+  CONTROL reset manual_kill at cursor 318 wall 2026-10-10T13:14:35.290+00:00: drill reviewed
+
+== Health ==
+  counts {'entry_block_set': 4, 'session_start': 1, 'feed_clock_offset': 1, 'entry_block_cleared': 3, 'metadata_version': 1, 'feed_ws_connected': 1, 'feed_continuity_check': 1, 'quotes_fresh': 1, 'feed_recovered': 1, 'rearmed': 1, 'feed_session_stop': 1} · unprotected exposure 0us
+  2026-10-10T13:14:30.973Z (2026-10-10T20:14:30.973+07:00) entry_block_set {"block": "feed_disconnected", "reason": "session_start"}
+  2026-10-10T13:14:30.973Z (2026-10-10T20:14:30.973+07:00) entry_block_set {"block": "restart_recovery", "reason": "session_start"}
+  2026-10-10T13:14:30.973Z (2026-10-10T20:14:30.973+07:00) entry_block_set {"block": "clock_unsynced", "reason": "clock_unverified"}
+  2026-10-10T13:14:30.973Z (2026-10-10T20:14:30.973+07:00) session_start {"position": null, "restart": false, "retired_order": null, "session": "20261010T131430Z-6215aa"}
+  2026-10-10T13:14:30.983Z (2026-10-10T20:14:30.983+07:00) feed_clock_offset {"offset_us": 5, "round_trip_us": 275}
+  2026-10-10T13:14:30.983Z (2026-10-10T20:14:30.983+07:00) entry_block_cleared {"block": "clock_unsynced", "offset_us": 5, "reason": null}
+  2026-10-10T13:14:30.983Z (2026-10-10T20:14:30.983+07:00) metadata_version {"execution_rules": 1, "fetched": "2026-10-10T13:14:30.983Z", "label": "PUBLIC", "sha256": "cfd321ada3c25eec48209025051e270dd266893ef009d4b38b8983872aa4ccaf", "status": "TRADING"}
+  2026-10-10T13:14:30.999Z (2026-10-10T20:14:30.999+07:00) feed_ws_connected {"conn": 1}
+  2026-10-10T13:14:30.999Z (2026-10-10T20:14:30.999+07:00) entry_block_cleared {"block": "feed_disconnected"}
+  2026-10-10T13:14:30.999Z (2026-10-10T20:14:30.999+07:00) feed_continuity_check {"from_bar": "2026-10-10T13:14:00.000Z"}
+  2026-10-10T13:14:32.563Z (2026-10-10T20:14:32.563+07:00) feed_recovered {"note": "warm-up/backfill and continuity done, stream connected, quote received after (re)connection, metadata present"}
+  2026-10-10T13:14:32.563Z (2026-10-10T20:14:32.563+07:00) entry_block_cleared {"block": "restart_recovery", "note": "recovered; no tradable position or order"}
+  2026-10-10T13:14:32.563Z (2026-10-10T20:14:32.563+07:00) rearmed {"cleared": ["restart_recovery"], "session": "20261010T131430Z-6215aa"}
+  2026-10-10T13:14:35.429Z (2026-10-10T20:14:35.429+07:00) feed_session_stop {"reason": "signal SIGINT"}
+  2026-10-10T13:14:35.429Z (2026-10-10T20:14:35.429+07:00) entry_block_set {"block": "feed_disconnected", "reason": "session_stop"}
+
+== Unresolved risk ==
+  none
+[exit 0]
+[PASS] reconciliation OK after graceful stop
+
+### 7. crash: owner B is terminated without cleanup; the OS releases both locks
+[PASS] owner B (restart) ready
+$ paperbot kill --state /tmp/pbverify-ecy0wr9l/drill/drill.sqlite --reason after crash
+PAPER | manual_kill latched (audited; direct). Pending entries are canceled and tradable inventory exits at the next trustworthy observation.
+[exit 0]
+[PASS] direct control works after the crash (lock released)
+
+### 8. restart after the crash: reconcile, keep the latch, recover; stop command
+[PASS] owner C (restart after crash) ready
+$ paperbot status --state /tmp/pbverify-ecy0wr9l/drill/drill.sqlite
+PAPER | PUBLIC DATA | FORWARD | MOCKED | BTCUSDT | B20-T5-v1 | account verify-2ac3f2f2
+cursor 341/0 · clock 2026-10-10T13:14:37.205Z · reconciliation OK
+config 682a55a348a36001 · input n/a · metadata PUBLIC (fetched, versioned)
+cash 1000 free + 0 locked USDT · BTC 0 (sellable 0, dust 0)
+mark bid 61814 age 51198us fresh · conservative equity 1000 · exposure 0
+realized net 0 · unrealized net (conservative) 0 · fees 0 USDT value
+latches ['manual_kill']
+feed: stream connected · quotes fresh (mark age 51198us) · last 1m bar 2026-10-10T13:13:00.000Z · candle missing False
+entry blocks: none · recovery signaled True · metadata a3e4be404e60 age 0s · clock checked 0s ago
+queued exit: none · pending order: none · unprotected exposure (cumulative) 0s · outbox {'pending': 21}
+UNRESOLVED: risk latches active: ['manual_kill']
+[exit 0]
+[PASS] manual_kill latch persisted across the crash
+$ paperbot reset --state /tmp/pbverify-ecy0wr9l/drill/drill.sqlite --latch manual_kill --reason drill done --confirm
+PAPER | manual_kill reset (audited; routed to the active forward runner: manual_kill reset (audited)). History is preserved; no implicit resume of other latches.
+[exit 0]
+[PASS] reset routed to the restarted owner
+$ paperbot stop --state /tmp/pbverify-ecy0wr9l/drill/drill.sqlite --reason drill complete
+PAPER | stop: {'ok': True, 'result': 'graceful stop requested'}
+[exit 0]
+[PASS] stop command
+[
+ {
+  "kind": "start",
+  "stopped_wall": "2026-10-10T13:14:35.531+00:00",
+  "stop_reason": "signal SIGINT"
+ },
+ {
+  "kind": "restart",
+  "stopped_wall": null,
+  "stop_reason": null
+ },
+ {
+  "kind": "restart",
+  "stopped_wall": "2026-10-10T13:14:38.188+00:00",
+  "stop_reason": "drill complete"
+ }
+]
+[PASS] sessions: start (signal stop), restart (crash: never stopped), restart (stop command)
+[PASS] final reconciliation
+[PASS] control endpoint withdrawn after stop
+
+--- owner-a log ---
+PAPER | PUBLIC DATA | forward runner 20261010T131430Z-6215aa (start) owns /tmp/pbverify-ecy0wr9l/drill/drill.sqlite; control endpoint /root/.local/state/paperbot/control/c62a775aa9634201fcb6e45a.sock
+PAPER | PUBLIC DATA | forward runner 20261010T131430Z-6215aa stopped (signal SIGINT); cursor 319
+
+
+--- owner-b log ---
+PAPER | PUBLIC DATA | forward runner 20261010T131436Z-46d11c (restart) owns /tmp/pbverify-ecy0wr9l/drill/drill.sqlite; control endpoint /root/.local/state/paperbot/control/c62a775aa9634201fcb6e45a.sock
+
+
+--- owner-c log ---
+PAPER | PUBLIC DATA | forward runner 20261010T131437Z-8eeb63 (restart) owns /tmp/pbverify-ecy0wr9l/drill/drill.sqlite; control endpoint /root/.local/state/paperbot/control/c62a775aa9634201fcb6e45a.sock
+PAPER | PUBLIC DATA | forward runner 20261010T131437Z-8eeb63 stopped (drill complete); cursor 343
+
+
+DRILL PASSED
+[exit 0]
+

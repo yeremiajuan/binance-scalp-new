@@ -1,0 +1,4 @@
+Reachability only: one GET /api/v3/time and one TLS handshake. No stream is subscribed.
+
+GET https://api.binance.com/api/v3/time -> FAILED: URLError: <urlopen error Tunnel connection failed: 403 Forbidden>
+TLS data-stream.binance.vision:443 -> FAILED: gaierror: [Errno -2] Name or service not known

@@ -1,0 +1,4 @@
+$ /tmp/pbverify-ecy0wr9l/venv/bin/python -m ruff check src tests scripts
+All checks passed!
+[exit 0]
+
