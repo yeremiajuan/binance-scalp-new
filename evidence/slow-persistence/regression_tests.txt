@@ -17,18 +17,18 @@ tests/test_forward.py::test_chunked_warmup_interleaves_health_checks_and_ends_in
 tests/test_forward.py::test_owner_lag_blocks_entries_until_the_queue_catches_up PASSED [ 87%]
 tests/test_forward.py::test_a_new_session_clears_an_owner_lag_block_left_by_the_previous_process PASSED [100%]
 
-========================= 8 passed in 94.47s (0:01:34) =========================
+========================= 8 passed in 98.72s (0:01:38) =========================
 [exit 0]
 
 ### reviewed source, same tests and emulation (expected: FAIL)
 $ taskset -c 0 /home/user/binance-scalp-new/.venv/bin/python -m pytest -q -rf -p no:cacheprovider tests/test_runner_e2e.py tests/test_slow_persistence.py tests/test_forward.py::test_chunked_warmup_interleaves_health_checks_and_ends_in_the_same_state tests/test_forward.py::test_owner_lag_blocks_entries_until_the_queue_catches_up tests/test_forward.py::test_a_new_session_clears_an_owner_lag_block_left_by_the_previous_process
   env PAPERBOT_TEST_COMMIT_DELAY_S=0.016
-  env PYTHONPATH=/tmp/pbslow-3f7z2qb6/reviewed/src
+  env PYTHONPATH=/tmp/pbslow-cxyggpxe/reviewed/src
 ...FFFFF                                                                 [100%]
 =================================== FAILURES ===================================
 _ test_silent_feed_is_detected_promptly_while_a_slow_warmup_is_still_being_committed _
 
-tmp_path = PosixPath('/tmp/pytest-of-root/pytest-133/test_silent_feed_is_detected_p0')
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-166/test_silent_feed_is_detected_p0')
 
     def test_silent_feed_is_detected_promptly_while_a_slow_warmup_is_still_being_committed(tmp_path):
         now = time.time_ns() // 1000
@@ -54,14 +54,30 @@ tmp_path = PosixPath('/tmp/pytest-of-root/pytest-133/test_silent_feed_is_detecte
         quotes = [w for w, t in timer.commits if t == "quote"]
         assert len(candles) >= 250 and quotes
         # queued input is not starved by the warm-up: quotes received during it were committed before it finished
->       assert quotes[0] < candles[-1], (quotes[0] - candles[0], candles[-1] - candles[0])
-E       AssertionError: (12.727935791015625, 12.60263991355896)
-E       assert 1791663763.9386258 < 1791663763.81333
+        assert quotes[0] < candles[-1], (quotes[0] - candles[0], candles[-1] - candles[0])
+        assert candles[-1] - candles[0] > 5.0  # the warm-up really was slow (>= 250 commits at >= 20 ms)
+>       delays = _assert_detected_in_time(timer, inventory_open=False)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-tests/test_slow_persistence.py:66: AssertionError
+tests/test_slow_persistence.py:68: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+timer = <runner_helpers.SlowCommits object at 0x7f0453adae40>
+inventory_open = False
+
+    def _assert_detected_in_time(timer: SlowCommits, inventory_open: bool) -> list[float]:
+        flips = [f for f in timer.stale_flips if f[1] is not None and f[2] == inventory_open]
+        assert flips, f"no stale transition recorded (inventory_open={inventory_open}): {timer.stale_flips}"
+        delays = [wall - (stamp / 1e6 + QUOTE_MAX_AGE_S) for wall, stamp, _ in flips]
+        for d in delays:
+>           assert -0.2 <= d <= DETECTION_SLACK_S, f"stale detected {d:+.2f} s after the quote became stale ({delays})"
+E           AssertionError: stale detected +11.09 s after the quote became stale ([11.089591979980469, 8.946964740753174, 6.714817523956299, 4.495538234710693, 2.265834331512451, 0.05973553657531738])
+E           assert 11.089591979980469 <= 2.5
+
+tests/test_slow_persistence.py:38: AssertionError
 _ test_open_inventory_on_a_silent_feed_under_slow_persistence_is_held_disclosed_and_never_exited_on_stale_data _
 
-tmp_path = PosixPath('/tmp/pytest-of-root/pytest-133/test_open_inventory_on_a_silen0')
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-166/test_open_inventory_on_a_silen0')
 
     def test_open_inventory_on_a_silent_feed_under_slow_persistence_is_held_disclosed_and_never_exited_on_stale_data(
             tmp_path):
@@ -109,12 +125,12 @@ tmp_path = PosixPath('/tmp/pytest-of-root/pytest-133/test_open_inventory_on_a_si
         assert len(candles) >= 400 and candles[-1] - candles[0] > 8.0  # a long, slow restart backfill ...
 >       assert stale_open[0] < candles[-1]  # ... and the exposed inventory went stale while it was being committed
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-E       assert 1791663794.679945 < 1791663794.5025947
+E       assert 1791666092.9244828 < 1791666092.747025
 
 tests/test_slow_persistence.py:124: AssertionError
 ___ test_chunked_warmup_interleaves_health_checks_and_ends_in_the_same_state ___
 
-tmp_path = PosixPath('/tmp/pytest-of-root/pytest-133/test_chunked_warmup_interleave0')
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-166/test_chunked_warmup_interleave0')
 
     def test_chunked_warmup_interleaves_health_checks_and_ends_in_the_same_state(tmp_path):
         from paperbot import codec
@@ -145,7 +161,7 @@ E           AttributeError: 'ForwardSession' object has no attribute 'pending_wo
 tests/test_forward.py:530: AttributeError
 ___________ test_owner_lag_blocks_entries_until_the_queue_catches_up ___________
 
-h = <fake_binance.Harness object at 0x7fc3bcd2b6f0>
+h = <fake_binance.Harness object at 0x7f0452c056e0>
 
     def test_owner_lag_blocks_entries_until_the_queue_catches_up(h):
         t = booted(h)
@@ -156,7 +172,7 @@ E       AttributeError: 'ForwardSession' object has no attribute 'observe_lag'
 tests/test_forward.py:550: AttributeError
 __ test_a_new_session_clears_an_owner_lag_block_left_by_the_previous_process ___
 
-tmp_path = PosixPath('/tmp/pytest-of-root/pytest-133/test_a_new_session_clears_an_o0')
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-166/test_a_new_session_clears_an_o0')
 
     def test_a_new_session_clears_an_owner_lag_block_left_by_the_previous_process(tmp_path):
         cfg = write_forward_config(tmp_path)
@@ -174,6 +190,6 @@ FAILED tests/test_slow_persistence.py::test_open_inventory_on_a_silent_feed_unde
 FAILED tests/test_forward.py::test_chunked_warmup_interleaves_health_checks_and_ends_in_the_same_state
 FAILED tests/test_forward.py::test_owner_lag_blocks_entries_until_the_queue_catches_up
 FAILED tests/test_forward.py::test_a_new_session_clears_an_owner_lag_block_left_by_the_previous_process
-5 failed, 3 passed in 96.86s (0:01:36)
+5 failed, 3 passed in 96.59s (0:01:36)
 [exit 1]
 

@@ -1,5 +1,5 @@
-$ /home/user/binance-scalp-new/.venv/bin/python scripts/phase2_mocked_demo.py /tmp/pbslow-3f7z2qb6/recorded
-mocked forward session: /tmp/pbslow-3f7z2qb6/recorded/fwd.sqlite
+$ /home/user/binance-scalp-new/.venv/bin/python scripts/phase2_mocked_demo.py /tmp/pbslow-cxyggpxe/recorded
+mocked forward session: /tmp/pbslow-cxyggpxe/recorded/fwd.sqlite
 export: {'events': 337, 'controls': 2, 'sha256': 'f248942ced20dc59391da150b5e92bc1d1191bcf91445d21b308cd5d22245aa1'}
 replay: {'events': 337, 'controls': 2, 'cursor': 337, 'provenance': 'MOCKED'}
 

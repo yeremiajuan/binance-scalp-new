@@ -188,8 +188,11 @@ The VPS review of `bd43c0a` found a failing test (`test_silent_open_stream_is_de
 heartbeats versus 4; under cProfile `quotes_stale` absent). Cause, reproduced with a slow-disk emulation: mainly a
 runtime delay (the warm-up was committed in one blocking call, ~5 s at ~16 ms per commit, so stale quotes were
 detected 4.8 s late in wall time), compounded by a test that judged the runner inside a fixed 6 s wall-clock window
-and counted heartbeats in it. With the runtime fix alone the original test passes even on a disk twice as slow;
-the test is nevertheless made readiness-based. Fixed by chunked backfill application with owner-lag disclosure and
+and counted heartbeats in it. With the runtime fix the original fixed-window test still passes or fails depending
+on timing (the regenerated evidence shows it failing at 1x and passing at 2x the emulated delay, on `beats >= 4`
+alone): heartbeats are only sent when nothing else advances the clock, and since the review of `fca062e` backfill
+chunks are stamped at the processing watermark and advance it themselves. The rewritten test waits for each
+condition and counts heartbeats after the stale detection. Fixed by chunked backfill application with owner-lag disclosure and
 readiness-based tests (decisions S1-S3); regression tests
 `tests/test_slow_persistence.py` (2), `test_forward.py::test_chunked_warmup_*`, `::test_owner_lag_*` (2) fail
 against `bd43c0a`; evidence in `evidence/slow-persistence/`.

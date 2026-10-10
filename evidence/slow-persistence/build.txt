@@ -1,4 +1,4 @@
-$ /home/user/binance-scalp-new/.venv/bin/python -m build --outdir /tmp/pbslow-3f7z2qb6/dist
+$ /home/user/binance-scalp-new/.venv/bin/python -m build --outdir /tmp/pbslow-cxyggpxe/dist
 running egg_info
 writing src/paperbot.egg-info/PKG-INFO
 writing dependency_links to src/paperbot.egg-info/dependency_links.txt
@@ -70,6 +70,7 @@ copying tests/test_forward.py -> paperbot-0.2.0/tests
 copying tests/test_inputs.py -> paperbot-0.2.0/tests
 copying tests/test_ledger.py -> paperbot-0.2.0/tests
 copying tests/test_locking.py -> paperbot-0.2.0/tests
+copying tests/test_owner_turn.py -> paperbot-0.2.0/tests
 copying tests/test_ownership.py -> paperbot-0.2.0/tests
 copying tests/test_persistence.py -> paperbot-0.2.0/tests
 copying tests/test_phase2_static.py -> paperbot-0.2.0/tests
@@ -177,7 +178,7 @@ running install_egg_info
 Copying src/paperbot.egg-info to build/bdist.linux-x86_64/wheel/./paperbot-0.2.0-py3.13.egg-info
 running install_scripts
 creating build/bdist.linux-x86_64/wheel/paperbot-0.2.0.dist-info/WHEEL
-creating '/tmp/pbslow-3f7z2qb6/dist/.tmp-hsxk_u57/paperbot-0.2.0-py3-none-any.whl' and adding 'build/bdist.linux-x86_64/wheel' to it
+creating '/tmp/pbslow-cxyggpxe/dist/.tmp-0p7q9azf/paperbot-0.2.0-py3-none-any.whl' and adding 'build/bdist.linux-x86_64/wheel' to it
 adding 'paperbot/__init__.py'
 adding 'paperbot/__main__.py'
 adding 'paperbot/cli.py'

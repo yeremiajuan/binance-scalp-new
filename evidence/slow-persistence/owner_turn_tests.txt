@@ -1,0 +1,129 @@
+### this source under VPS emulation (expected: PASS)
+$ taskset -c 0 /home/user/binance-scalp-new/.venv/bin/python -m pytest -v -p no:cacheprovider tests/test_owner_turn.py tests/test_slow_persistence.py tests/test_runner_e2e.py
+  env PAPERBOT_TEST_COMMIT_DELAY_S=0.016
+  env PYTHONPATH=/home/user/binance-scalp-new/src
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0 -- /home/user/binance-scalp-new/.venv/bin/python
+rootdir: /home/user/binance-scalp-new
+configfile: pyproject.toml
+collecting ... collected 9 items
+
+tests/test_owner_turn.py::test_a_delayed_breakout_candle_meets_the_lag_block_before_any_entry_decision PASSED [ 11%]
+tests/test_owner_turn.py::test_the_first_delayed_fill_quote_cancels_the_entry_instead_of_filling_it PASSED [ 22%]
+tests/test_owner_turn.py::test_exits_still_run_on_delayed_quotes_while_entries_are_blocked PASSED [ 33%]
+tests/test_owner_turn.py::test_held_candle_released_by_a_forced_final_chunk_keeps_a_valid_timestamp PASSED [ 44%]
+tests/test_slow_persistence.py::test_silent_feed_is_detected_promptly_while_a_slow_warmup_is_still_being_committed PASSED [ 55%]
+tests/test_slow_persistence.py::test_open_inventory_on_a_silent_feed_under_slow_persistence_is_held_disclosed_and_never_exited_on_stale_data PASSED [ 66%]
+tests/test_runner_e2e.py::test_threaded_runner_reconnects_routes_controls_holds_locks_and_stops_gracefully PASSED [ 77%]
+tests/test_runner_e2e.py::test_silent_open_stream_is_detected_without_any_message PASSED [ 88%]
+tests/test_runner_e2e.py::test_missing_connectivity_is_reported_and_blocks_entries_not_concealed PASSED [100%]
+
+========================= 9 passed in 99.35s (0:01:39) =========================
+[exit 0]
+
+### 1f2c3f1 (fca062e behavior, owner_turn extracted) (expected: 3 FAIL, exits test passes)
+$ taskset -c 0 /home/user/binance-scalp-new/.venv/bin/python -m pytest -q -rf -p no:cacheprovider tests/test_owner_turn.py
+  env PAPERBOT_TEST_COMMIT_DELAY_S=0.016
+  env PYTHONPATH=/tmp/pbslow-cxyggpxe/reviewed-turn/src
+FF.F                                                                     [100%]
+=================================== FAILURES ===================================
+_ test_a_delayed_breakout_candle_meets_the_lag_block_before_any_entry_decision _
+
+h = <fake_binance.Harness object at 0x7f29e116e900>
+
+    def test_a_delayed_breakout_candle_meets_the_lag_block_before_any_entry_decision(h):
+        t = booted(h)
+        bb = BARS[250]
+        h.run_quotes(t, bb.end_us + 300 * MS, bb.close)  # fresh quotes up to the close (no lag)
+        clock = FakeClock(bb.end_us + 400 * MS)
+        inbox = StampedQueue(clock)
+        inbox.put("ws_message", {"conn": 1, "text": ws_kline(bb)})  # received 400 ms after the close ...
+        clock.t += LAG  # ... and reached by the owner 2.5 s later
+        turn(h, inbox, clock)
+        (c,) = rows(h.state, "SELECT * FROM candidates WHERE bar_start_us = ?", (bb.start_us,))
+>       assert c["status"] == "skipped" and c["skip_reason"] == "entry_block:owner_lag", c
+E       AssertionError: {'candidate_id': 'test-account|BTCUSDT|B20-T5-v1|99987130fefdf474|2026-10-01T16:10:00.000Z', 'seq': 311, 'bar_start_us': 1790871000000000, 'bar_end_us': 1790871060000000, ...}
+E       assert ('submitted' == 'skipped'
+E         
+E         - skipped
+E         + submitted)
+
+tests/test_owner_turn.py:74: AssertionError
+__ test_the_first_delayed_fill_quote_cancels_the_entry_instead_of_filling_it ___
+
+h = <fake_binance.Harness object at 0x7f29e20b1bd0>
+
+    def test_the_first_delayed_fill_quote_cancels_the_entry_instead_of_filling_it(h):
+        t = booted(h)
+        bb = BARS[250]
+        h.run_quotes(t, bb.end_us + 300 * MS, bb.close)
+        h.bar(bb)  # processed without lag: entry submitted, ready after the modeled latency
+        o = h.st.order
+        assert o is not None and o.purpose == "entry"
+        clock = FakeClock(o.ready_us + 50 * MS)
+        inbox = StampedQueue(clock)
+        inbox.put("ws_message", {"conn": 1, "text": quote_text(h, bb.close + 2)})  # would fill this entry
+        clock.t += LAG
+        turn(h, inbox, clock)
+>       assert rows(h.state, "SELECT * FROM fills") == []  # the reviewed code bought 0.00292 BTC here
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: assert [{'fill_id': ...q': 312, ...}] == []
+E         
+E         Left contains one more item: {'fill_id': 'test-account|BTCUSDT|B20-T5-v1|99987130fefdf474|2026-10-01T16:10:00.000Z|entry|fill', 'order_id': 'test-account|BTCUSDT|B20-T5-v1|99987130fefdf474|2026-10-01T16:10:00.000Z|entry', 'quote_event_id': 'bt:1101', 'seq': 312, ...}
+E         Use -v to get more diff
+
+tests/test_owner_turn.py:93: AssertionError
+__ test_held_candle_released_by_a_forced_final_chunk_keeps_a_valid_timestamp ___
+
+h = <fake_binance.Harness object at 0x7f29e1054050>
+
+    def test_held_candle_released_by_a_forced_final_chunk_keeps_a_valid_timestamp(h):
+        """Reviewer's reproduction: final warm-up chunk outstanding, a closed live candle (held), then sampled-out quotes
+        that advance no engine clock, with another input still queued when the chunk is forced."""
+        now = BARS[249].end_us + 10_000 * MS
+        h.session.backfill_chunk = 20
+        h.start(now)
+        h.answer_all(now + 100 * MS)
+        for _ in range(12):  # 250 warm-up bars: leave the final chunk (10 bars) outstanding
+            h.session.work()
+        a = h.session.applying
+        assert a is not None and len(a["candles"]) - a["i"] == 10
+        bb = BARS[250]
+        end = bb.end_us
+        clock = FakeClock(end - 200 * MS)
+        inbox = StampedQueue(clock)
+        inbox.put("ws_message", {"conn": 1, "text": quote_text(h, bb.close)})  # forwarded: last engine clock
+        clock.t = end + 500 * MS
+        inbox.put("ws_message", {"conn": 1, "text": ws_kline(bb)})  # closed live candle: held
+        for k in range(INPUTS_PER_CHUNK):  # sampled out (within 1 s of the forwarded quote): no engine event
+            clock.t = end + 600 * MS + k * 10 * MS
+            inbox.put("ws_message", {"conn": 1, "text": quote_text(h, bb.close + 1)})
+        clock.t = end + 1_300 * MS
+        inbox.put("ws_message", {"conn": 1, "text": quote_text(h, bb.close + 2)})  # forwarded, still queued
+        since, forced_with_queue = 0, None
+        for _ in range(100):
+            was_pending = h.session.pending_work()
+            since = turn(h, inbox, clock, since)
+            if was_pending and not h.session.pending_work():
+                forced_with_queue = inbox.q.qsize()
+            if inbox.q.empty() and not h.session.pending_work():
+                break
+        assert forced_with_queue and forced_with_queue >= 1  # the chunk was forced while inputs were still queued
+        assert h.session.stats["quote_sampled_out"] >= INPUTS_PER_CHUNK - 2
+        rejected = rows(h.state, "SELECT event_type, detail FROM input_log WHERE disposition = 'rejected'")
+>       assert rejected == [], rejected  # the reviewed code rejected the candle: received_before_interval_end
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: [{'event_type': 'candle', 'detail': '{"reason": "received_before_interval_end"}'}]
+E       assert [{'event_type...erval_end"}'}] == []
+E         
+E         Left contains one more item: {'event_type': 'candle', 'detail': '{"reason": "received_before_interval_end"}'}
+E         Use -v to get more diff
+
+tests/test_owner_turn.py:160: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_owner_turn.py::test_a_delayed_breakout_candle_meets_the_lag_block_before_any_entry_decision
+FAILED tests/test_owner_turn.py::test_the_first_delayed_fill_quote_cancels_the_entry_instead_of_filling_it
+FAILED tests/test_owner_turn.py::test_held_candle_released_by_a_forced_final_chunk_keeps_a_valid_timestamp
+3 failed, 1 passed in 26.34s
+[exit 1]
+

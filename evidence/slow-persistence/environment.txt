@@ -4,10 +4,17 @@ cpus 4
 emulation: commit delay 0.016 s; pinned to one CPU with a competing CPU burner: True
 reviewed source bd43c0a
 $ git rev-parse HEAD
-1c82117ef7b98260e747145f53bace02da28ebbb
+e78eede40268180455295330276cf09d4957eb9d
 [exit 0]
 
 $ git status --porcelain
-?? evidence/slow-persistence/
+ D evidence/slow-persistence/SHA256SUMS
+ D evidence/slow-persistence/build.txt
+ M evidence/slow-persistence/environment.txt
+ D evidence/slow-persistence/pytest.txt
+ D evidence/slow-persistence/recorded_replay.txt
+ D evidence/slow-persistence/regression_tests.txt
+ D evidence/slow-persistence/reproduction.txt
+ D evidence/slow-persistence/ruff.txt
 [exit 0]
 
