@@ -15,6 +15,8 @@ exact commands and outputs under the evidence folder, with ``summary.md`` (PASS/
   ruff.txt, build.txt   lint and package build
   validate_config.txt   both configurations
   synthetic_replay.txt  Phase 1 fixture regenerates byte-for-byte; two replays are identical; reconciliation OK
+  timezone.txt          tzdata package fallback: zoneinfo with no system database (PYTHONTZPATH=""), both
+                        configurations validate, and a demo replay crossing 00:00 Asia/Jakarta matches the default
   recorded_replay.txt   MOCKED forward session -> export -> recorded replay -> table comparison
   ownership_drill.txt   real processes: owner on mocked data, status/positions, competing owners and path aliases,
                         account lock, ACLs of the per-user files, routed kill/reset, unauthenticated client refused,
@@ -183,6 +185,21 @@ def checks(rec: Recorder, vpy: Path, work: Path) -> None:
     rc4, rep = rec.run(name, [vpy, "-m", "paperbot", "report", "--state", states[0]])
     rec.result("synthetic replay determinism", name, same and rcs == [0, 0] and rc3 == 0
                and "IDENTICAL" in cmp_out and "reconciliation OK" in rep)
+
+    name = "timezone.txt"
+    no_tz = {**env, "PYTHONTZPATH": ""}  # no OS timezone database, as on a clean Windows install
+    rec.run(name, [vpy, "-c", "import zoneinfo, importlib.metadata as m; print('default TZPATH', zoneinfo.TZPATH); "
+                              "print('tzdata', m.version('tzdata'))"], env=env)
+    rc0, out0 = rec.run(name, [vpy, "-c", "import zoneinfo; print('TZPATH', zoneinfo.TZPATH); "
+                                          "print(zoneinfo.ZoneInfo('Asia/Jakarta'))"], env=no_tz)
+    oks = [rec.run(name, [vpy, "-m", "paperbot", "validate-config", c], env=no_tz)[0] == 0
+           for c in ("config/forward.toml", "config/paper.toml")]
+    pkg = work / "replay-tzdata-package.sqlite"
+    rc1, _ = rec.run(name, [vpy, "-m", "paperbot", "replay", "--config", "config/paper.toml", "--input",
+                            "fixtures/synthetic_demo.jsonl", "--state", pkg, "--quiet"], env=no_tz)
+    rc2, cmp_tz = rec.run(name, [vpy, "scripts/compare_states.py", states[0], pkg])
+    rec.result("timezone data without a system database (tzdata package)", name,
+               rc0 == 0 and "TZPATH ()" in out0 and all(oks) and rc1 == 0 and rc2 == 0 and "IDENTICAL" in cmp_tz)
 
     rc, out = rec.run("recorded_replay.txt", [vpy, "scripts/phase2_mocked_demo.py", work / "recorded"], env=env)
     rec.result("mocked recorded-replay comparison", "recorded_replay.txt", rc == 0 and "IDENTICAL" in out)

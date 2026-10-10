@@ -12,6 +12,8 @@ import os
 import re
 import sqlite3
 import stat
+import subprocess
+import sys
 import threading
 
 import pytest
@@ -273,3 +275,59 @@ def test_control_never_reads_a_request_from_an_unauthenticated_client(server):
     finally:
         raw.close()
     assert out.seen == []  # nothing reached the owner
+
+
+# ---------------------------------------------- no system timezone database (native Windows, minimal images)
+
+NO_SYSTEM_TZ = {"PYTHONTZPATH": ""}  # zoneinfo then finds no OS database and can only use the tzdata package
+CONFIGS = ("config/forward.toml", "config/paper.toml")
+
+
+def _py(code: str, *args: str, block_tzdata: bool = False) -> subprocess.CompletedProcess:
+    from conftest import ROOT
+
+    prefix = "import sys; sys.modules['tzdata'] = None\n" if block_tzdata else ""
+    return subprocess.run([sys.executable, "-c", prefix + code, *args], capture_output=True, encoding="utf-8",
+                          errors="replace", cwd=ROOT, env={**os.environ, **NO_SYSTEM_TZ}, timeout=120)
+
+
+def test_without_system_tz_data_zoneinfo_uses_the_installed_tzdata_package():
+    r = _py("import zoneinfo, importlib.resources as res\n"
+            "assert zoneinfo.TZPATH == (), zoneinfo.TZPATH\n"
+            "assert res.files('tzdata.zoneinfo').joinpath('Asia/Jakarta').is_file()\n"
+            "print(zoneinfo.ZoneInfo('Asia/Jakarta'))")
+    assert r.returncode == 0 and r.stdout.strip() == "Asia/Jakarta", r.stderr
+    # control: the same environment without the package reproduces the failure seen on a clean Windows install
+    r = _py("import zoneinfo\nzoneinfo.ZoneInfo('Asia/Jakarta')", block_tzdata=True)
+    assert r.returncode != 0 and "ZoneInfoNotFoundError" in r.stderr
+
+
+@pytest.mark.parametrize("config", CONFIGS)
+def test_both_configurations_validate_without_system_tz_data(config):
+    from conftest import ROOT
+
+    from paperbot.config import load_config
+
+    p = subprocess.run([sys.executable, "-m", "paperbot", "validate-config", config], capture_output=True,
+                       encoding="utf-8", errors="replace", cwd=ROOT, env={**os.environ, **NO_SYSTEM_TZ},
+                       timeout=120)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "configuration OK" in p.stdout and f"config_sha256 {load_config(ROOT / config).sha256}" in p.stdout
+    blocked = _py("from paperbot.cli import main\nsys.exit(main(['validate-config', sys.argv[1]]))", config,
+                  block_tzdata=True)
+    assert blocked.returncode == 2 and "is not a valid IANA zone" in blocked.stderr  # the reviewed defect
+
+
+def test_local_day_boundaries_are_identical_with_package_tz_data():
+    """Daily risk baselines roll over at 00:00 Asia/Jakarta (17:00 UTC); the package data must agree with the
+    system database (the full demo replay is compared in scripts/verify_windows.py)."""
+    from paperbot.timeutil import local_date, local_iso, parse_ts
+
+    stamps = [parse_ts(t) for t in ("2026-10-01T16:59:59.999Z", "2026-10-01T17:00:00Z", "2026-12-31T17:00:00Z",
+                                    "2027-03-28T17:00:00Z", "2026-10-25T01:30:00Z")]
+    code = ("import json\nfrom paperbot.timeutil import local_date, local_iso\n"
+            "print(json.dumps([[local_date(s, 'Asia/Jakarta'), local_iso(s, 'Asia/Jakarta')] "
+            "for s in json.loads(sys.argv[1])]))")
+    r = _py("import sys\n" + code, json.dumps(stamps))
+    assert r.returncode == 0, r.stderr
+    assert json.loads(r.stdout) == [[local_date(s, "Asia/Jakarta"), local_iso(s, "Asia/Jakarta")] for s in stamps]

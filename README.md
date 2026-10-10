@@ -26,7 +26,7 @@ python -m build                                     # sdist + wheel
 
 Requirements: Linux (verified) or native Windows 10/11 (implemented; **Windows validation NOT RUN**: run
 `scripts\verify_windows.py` on the PC, see `docs/WINDOWS.md` for PowerShell setup and operation; WSL is not
-needed). macOS is untested. State must live on a local disk. Runtime dependencies: `websockets` and `filelock`.
+needed). macOS is untested. State must live on a local disk. Runtime dependencies: `websockets`, `filelock` and `tzdata` (IANA zones; Windows has none of its own).
 
 ## Phase 1: synthetic replay (unchanged)
 

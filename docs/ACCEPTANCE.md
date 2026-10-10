@@ -78,5 +78,6 @@ the same script run on Linux (`--allow-non-windows`); it is not Windows evidence
 | 10 | PowerShell installation and operation instructions | `docs/WINDOWS.md` | provided | not exercised |
 | 11 | One Windows verification script, no Bash/WSL, outputs saved separately | `scripts/verify_windows.py` → `evidence/windows/`; Linux run → `evidence/platform-linux/` | ran (Linux) | NOT RUN |
 | 12 | Strategy, risk, fees, fill assumptions, accounting unchanged; PAPER and public data only | configuration hashes unchanged (`3f9aba57…`, `ec9203a1…`); synthetic replay determinism and mocked recorded-replay comparison IDENTICAL; static scans unchanged | passed | NOT RUN |
-| 13 | Native Windows acceptance | requires execution on actual Windows | — | **NOT RUN** |
+| 13 | Clean install has time-zone data without an OS database (review finding on `5d71ae2`) | `tzdata` runtime dependency; `test_platform.py::test_without_system_tz_data_zoneinfo_uses_the_installed_tzdata_package` (with a control that reproduces the failure when the package is hidden), `::test_both_configurations_validate_without_system_tz_data[forward/paper]`, `::test_local_day_boundaries_are_identical_with_package_tz_data` (all four fail with `tzdata` uninstalled); `timezone.txt` in the verification evidence (both configurations validate and the demo replay is IDENTICAL with `PYTHONTZPATH=""`) | passed | NOT RUN |
+| 14 | Native Windows acceptance | requires execution on actual Windows | — | **NOT RUN** |
 

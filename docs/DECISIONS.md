@@ -317,4 +317,10 @@ W5. **Text and line endings.** Every file read/write names UTF-8. Files that are
 W6. **Verification.** `scripts/verify_windows.py` (Python only) runs the checks and saves outputs under
     `evidence/windows/`. Subprocess tests (`tests/test_ownership.py`) run unchanged on Linux and Windows; platform
     branches are limited to alias spellings and the stop signal.
+W7. **Time-zone data (review finding on `5d71ae2`).** `tzdata` is a runtime dependency on every platform. Native
+    Windows has no IANA database, so without it `ZoneInfo("Asia/Jakarta")` fails and neither configuration
+    validates. `zoneinfo` still prefers an OS database where one exists (Linux), and falls back to the package
+    otherwise (Windows, minimal containers). Declared unconditionally rather than with a Windows marker so the
+    fallback is the same package everywhere and is testable on Linux (`PYTHONTZPATH=""`). `Asia/Jakarta` and all
+    economic settings are unchanged; configuration hashes are unchanged.
 

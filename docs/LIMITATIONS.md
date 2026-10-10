@@ -119,6 +119,10 @@
   `..` and short-name spellings instead, and skip the symlink spellings.
 - **Synced folders and antivirus.** OneDrive/Dropbox folders and real-time scanning can interfere with SQLite
   files; the verification script reports whether the repository is under OneDrive. Not tested.
+- **Time-zone data on Windows comes from the `tzdata` package.** Tested on Linux by hiding the system database
+  (`PYTHONTZPATH=""`): both configurations validate and the demo replay (two local midnights) is identical to the
+  system-database replay. A stale `tzdata` release could matter only for a zone whose rules change; Asia/Jakarta
+  has been fixed at UTC+7 since 1964.
 - **macOS** remains untested.
 
 ## Defects

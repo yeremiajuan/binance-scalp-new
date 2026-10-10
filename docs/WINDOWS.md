@@ -45,8 +45,21 @@ $env:PYTHONUTF8 = "1"
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
 ```
 
-Runtime dependencies: `websockets` (public market streams) and `filelock` (OS-backed process locks). No compiler
-or Windows-specific package (pywin32) is needed.
+Runtime dependencies: `websockets` (public market streams), `filelock` (OS-backed process locks) and `tzdata`
+(the IANA time-zone database). Windows has no IANA database of its own, so Python's `zoneinfo` reads
+`Asia/Jakarta` (the risk-day time zone) from the `tzdata` package; without it a clean install cannot even
+validate a configuration (`risk.day_timezone 'Asia/Jakarta' is not a valid IANA zone`). `pip install -e .`
+installs it. No compiler or Windows-specific package (pywin32) is needed.
+
+Check after installing (prints `Asia/Jakarta`):
+
+```powershell
+.\.venv\Scripts\python.exe -c "import zoneinfo; print(zoneinfo.ZoneInfo('Asia/Jakarta'))"
+```
+
+If it fails, the environment is missing the package: `.\.venv\Scripts\python.exe -m pip install tzdata`. Keep
+`tzdata` up to date with the rest of the environment; Asia/Jakarta has been UTC+7 without daylight saving since
+1964, so its day boundary (17:00 UTC) does not depend on the release.
 
 ## 3. Verify this PC (one script, no Bash/WSL)
 
@@ -60,8 +73,9 @@ Get-Content evidence\windows\summary.md
 It creates its own clean virtual environment in a temporary folder and writes `evidence\windows\`:
 `environment.txt` (Windows build, Python, git state, `w32tm /query /status`, `powercfg /a`, code page, disk),
 `connectivity.txt` (one `GET /api/v3/time` and one TLS handshake; informational), `pytest.txt`, `ruff.txt`,
-`build.txt`, `validate_config.txt`, `synthetic_replay.txt`, `recorded_replay.txt`, `ownership_drill.txt`,
-`summary.md` and `SHA256SUMS`. It does not start a public-data session.
+`build.txt`, `validate_config.txt`, `synthetic_replay.txt`, `timezone.txt` (both configurations validated and the
+demo replayed with no system time-zone database, compared with the default replay), `recorded_replay.txt`,
+`ownership_drill.txt`, `summary.md` and `SHA256SUMS`. It does not start a public-data session.
 
 The ownership drill runs real processes on mocked public data (a local WebSocket server and a fake REST transport):
 a running owner, `status`/`positions`, competing owners refused for the same path and for aliases (`..`,
