@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 from conftest import rows, write_forward_config
 from fake_binance import FakeMarket, FakeStream
+from runner_helpers import poll_rows, wait_for
 
 from paperbot.reconcile import reconcile
 from paperbot.storage import Storage
@@ -101,6 +102,14 @@ def env(tmp_path):
     stream.close()
 
 
+def rearmed_after_last_session_start(state: Path) -> bool:
+    kinds = [r["kind"] for r in poll_rows(state, "SELECT kind FROM health_events ORDER BY id")]
+    if "session_start" not in kinds:
+        return False
+    last = len(kinds) - 1 - kinds[::-1].index("session_start")
+    return "rearmed" in kinds[last:]
+
+
 def alias_spellings(tmp: Path, state: Path) -> list[str]:
     """Other spellings of ``state`` that must reach the same lock."""
     (tmp / "sub").mkdir(exist_ok=True)
@@ -154,6 +163,8 @@ def test_crash_releases_ownership_and_restart_reconciles_and_recovers(env):
     assert k.returncode == 0 and "direct" in k.stdout, (k.stdout, k.stderr)
     b = start_owner(state, "b")
     assert b.wait_ready(min_cursor=cursor + 5)["ok"]
+    # recovery is asserted below, so wait for it (bounded) instead of assuming it happened by the stop
+    wait_for(lambda: rearmed_after_last_session_start(state), "the restarted owner to rearm")
     st = cli("status", "--state", str(state))
     assert st.returncode == 0 and "manual_kill" in st.stdout  # persistent latch kept across the crash
     r = cli("reset", "--state", str(state), "--latch", "manual_kill", "--reason", "reviewed", "--confirm")

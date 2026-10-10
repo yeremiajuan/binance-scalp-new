@@ -333,13 +333,19 @@ S1. **Backfill results are applied in chunks.** A warm-up or gap backfill result
     (~300 commits, ~5 s on the VPS; up to 1000 commits for a long outage) while the owner processed nothing else:
     queued quotes, stream status, controls and heartbeat ticks all waited, so stale-quote detection was late in
     wall time by the whole backfill. The runner now applies `BACKFILL_CHUNK` (20) bars per turn. Queued inputs go
-    first; a chunk runs when the queue is empty or after 20 inputs, so neither side starves. Chunk bars are
-    stamped with the later of the REST response time and the engine clock, so every input stays in order and no
-    bar is stamped before its close. Live bars stay held and recovery is not signaled until the last chunk. Step
+    first; a chunk runs when the queue is empty or after 20 inputs, so neither side starves. Chunk bars, and held
+    live bars released after the last chunk, are stamped at the processing watermark: the latest stamp of every
+    input the owner has handled (ticks, controls and inputs that produce no engine event, such as a held candle or
+    a sampled-out quote, included). Every queued input is stamped later, so ordering holds; a released bar is never
+    stamped before its own receipt, so never before its close, and its lateness is measured at processing time.
+    (Review of `fca062e`: the engine clock alone missed held candles and sampled-out quotes, so a candle released
+    by a chunk forced on a busy queue could be stamped before its close and rejected.) Live bars stay held and recovery is not signaled until the last chunk. Step
     mode (`backfill_chunk=None`) still applies a result in one call. Receipt stamps of backfill bars change (they
     are stamped when applied); prices, indicators and decisions do not (backfill bars never create entries).
 S2. **Owner lag is measured and blocks new entries.** For each processed input the runner measures how long it
-    waited in the queue. Above `quote_max_age` (2 s) a recorded `owner_lag` feed event raises the `owner_lag` entry
+    waited in the queue and applies the lag rule before the input is processed (stamped at the input's receipt),
+    so a delayed breakout candle or fill quote meets the block instead of creating or filling an entry first
+    (review of `fca062e`: the check ran after the input, and a delayed first fill quote bought 0.00292 BTC). Above `quote_max_age` (2 s) a recorded `owner_lag` feed event raises the `owner_lag` entry
     block (decisions are made at receipt stamps, so a simulated entry would otherwise be earlier than a real
     process could act); it clears below half the limit, and a new session clears a block left by a previous
     process. Exits are not blocked. `session_stop` records `max_owner_lag_ms`, the number of queued inputs

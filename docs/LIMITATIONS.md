@@ -194,4 +194,18 @@ readiness-based tests (decisions S1-S3); regression tests
 `tests/test_slow_persistence.py` (2), `test_forward.py::test_chunked_warmup_*`, `::test_owner_lag_*` (2) fail
 against `bd43c0a`; evidence in `evidence/slow-persistence/`.
 
+The review of `fca062e` found two P1 defects in that fix, both fixed with regressions in
+`tests/test_owner_turn.py` that drive the real owner loop (`owner_turn`, extracted without behavior change in
+`1f2c3f1`) and fail against it:
+
+| # | Finding | Fix | Regression tests |
+|---|---|---|---|
+| 1 (P1) | Owner lag was checked after the delayed input was processed: a pending entry filled on the first quote that had waited 2.5 s | The lag rule runs before the input (`ForwardSession.handle(item, lag_us)`); exits are unaffected | `test_a_delayed_breakout_candle_meets_the_lag_block_before_any_entry_decision`, `test_the_first_delayed_fill_quote_cancels_the_entry_instead_of_filling_it`, `test_exits_still_run_on_delayed_quotes_while_entries_are_blocked` |
+| 2 (P1) | A held candle released by the final backfill chunk, forced on a busy queue, was stamped with the engine clock (before its close) and rejected | Chunks and released bars are stamped at an ordered processing watermark covering every handled input | `test_held_candle_released_by_a_forced_final_chunk_keeps_a_valid_timestamp` |
+
+While verifying these fixes, one full-suite run failed `test_ownership.py::test_crash_releases_ownership_and_restart_reconciles_and_recovers`
+(1 in 6 isolated runs): it asserted that the restarted owner had rearmed without waiting for it, and under CPU
+contention the stop came first. The test now waits (bounded) for the rearm before stopping; 10 of 10 runs passed
+pinned to one CPU shared with a CPU burner.
+
 No other Phase 2 defect is known. That is the implementer's assessment; Phase 2 needs independent re-review.

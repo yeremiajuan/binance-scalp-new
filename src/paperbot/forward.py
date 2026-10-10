@@ -20,8 +20,13 @@ Normalization rules (documented in docs/DECISIONS.md, Phase 2):
 * A warm-up or backfill result is applied in bounded chunks (``backfill_chunk`` bars per ``work()`` call) when the
   runner asks for it: between chunks the owner processes queued observations, controls and heartbeat ticks, so a
   slow disk (one fsync per committed input) cannot keep health detection blind for the whole backfill. Chunk bars
-  are stamped with the later of the REST response time and the engine clock, so inputs stay in order and a bar is
-  never stamped before its close. Live bars stay held, and recovery is not signaled, until the last chunk.
+  (and held live bars released after the last chunk) are stamped at the processing watermark: the latest stamp of
+  every input the owner has handled, including inputs that produced no engine event (a held candle, a sampled-out
+  quote). Queued inputs are stamped later, so ordering holds, and a released bar is never stamped before its own
+  receipt (hence never before its close); its lateness is measured at that processing time. Live bars stay held,
+  and recovery is not signaled, until the last chunk.
+* Owner lag (wall time an input waited in the queue, measured by the runner) is applied before the input is
+  processed, so a delayed candle or quote meets the ``owner_lag`` entry block instead of acting first.
 * Rearming (after a start, restart or reconnect) needs: warm-up/backfill done with no held bars and no missing
   candle, the stream connected, a quote received after the (re)connection, and current metadata. After a reconnect
   candle continuity is revalidated from REST before rearming. The clock check starts pending at every session
@@ -87,6 +92,7 @@ class ForwardSession:
         self.backfill_chunk = backfill_chunk  # None: apply a result in one call (step mode)
         self.lagging = False
         self.max_lag_us = 0
+        self.watermark_us = 0  # latest stamp of any handled input, tick or control (ordered: queue is FIFO)
         self.ws_connected = False
         self.rest_down = False
         self.time_failures = 0
@@ -140,7 +146,15 @@ class ForwardSession:
 
     # ---------------------------------------------------------------- handle
 
-    def handle(self, item: Item) -> dict | None:
+    def _advance(self, stamp: int) -> None:
+        self.watermark_us = max(self.watermark_us, stamp)
+
+    def handle(self, item: Item, lag_us: int | None = None) -> dict | None:
+        """Process one queued item. ``lag_us`` (runner only) is how long it waited in the queue: the lag rule is
+        applied first, so a delayed input is already subject to the ``owner_lag`` entry block when it is used."""
+        self._advance(item.recv_us)
+        if lag_us is not None:
+            self.observe_lag(lag_us, item.recv_us)
         if item.kind == "ws_message":
             self.raw_sink({"recv_us": item.recv_us, "source": "ws", **item.data})
             self._ws_message(item.data.get("text", ""), item.recv_us)
@@ -293,7 +307,8 @@ class ForwardSession:
             return
         budget = self.backfill_chunk if self.backfill_chunk is not None else len(a["candles"]) + 1
         candles = a["candles"]
-        stamp = max(a["recv"], self.engine.state.clock_us or 0)  # ordered after everything already processed
+        # at or after every handled input (the engine clock alone misses held candles and sampled-out quotes)
+        stamp = max(a["recv"], self.engine.state.clock_us or 0, self.watermark_us)
         done = False
         while budget > 0:
             if a["i"] >= len(candles):
@@ -377,6 +392,7 @@ class ForwardSession:
     # ------------------------------------------------------------------- tick
 
     def tick(self, now: int) -> None:
+        self._advance(now)
         if self.backfill is not None and now - self.backfill[1] >= self.fwd.backfill_timeout_s * US_PER_S:
             purpose = "warmup" if not self.warmup_done else "backfill"
             self.feed("backfill_failed", now, purpose=purpose, held_bars=len(self.held))
@@ -403,6 +419,7 @@ class ForwardSession:
 
     def control(self, cmd: dict, now: int) -> dict:
         """Local controls routed through the single owner while the runner is active."""
+        self._advance(now)
         try:
             kind = cmd.get("cmd")
             wall = str(cmd.get("wall_utc") or "")

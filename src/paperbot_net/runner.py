@@ -219,15 +219,17 @@ def owner_turn(session: ForwardSession, inbox: StampedQueue, clock, *, store, no
     item = inbox.get(timeout=0 if session.pending_work() else tick_s)
     if item is not None:
         lag = clock.now_us() - item.recv_us  # wall time this input waited for the owner
+        # the lag rule is applied before the input is used (stamped at its receipt, so ordering holds)
         if item.kind == "control":
+            session.observe_lag(lag, item.recv_us)
             reply_q = item.data.pop("_reply")
             reply_q.put(session.control({**item.data, "wall_utc": wall_iso()}, item.recv_us))
         elif item.kind == "outbox_result":
+            session.observe_lag(lag, item.recv_us)
             d = item.data
             store.outbox_update(d["msg_id"], d["status"], d["attempts"], wall_iso(), d.get("error"))
         else:
-            session.handle(item)
-        session.observe_lag(lag, max(item.recv_us, session.engine.state.clock_us or 0))
+            session.handle(item, lag_us=lag)
         since_chunk += 1
     now = inbox.tick_time()
     if now is not None:
