@@ -137,11 +137,11 @@ def main() -> int:
         run("reproduction.txt", pin + [PY, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-p", "slow_disk_plugin",
                                        f"{old_test}{sel}"],
             {**new_env, "EMULATED_COMMIT_DELAY_S": str(args.delay * 2)},
-            "2b. THIS source + the reviewed test on a disk twice as slow: the fixed window fails again")
+            "2b. THIS source + the reviewed fixed-window test on a disk twice as slow (result recorded as is)")
         run("reproduction.txt", pin + [PY, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-p", "slow_disk_plugin",
                                        f"tests/test_runner_e2e.py{sel}"],
             {**new_env, "EMULATED_COMMIT_DELAY_S": str(args.delay * 2)},
-            "2c. THIS source + the rewritten readiness-based test on the same twice-as-slow disk: passes")
+            "2c. THIS source + the rewritten readiness-based test on the same twice-as-slow disk (expected: PASS)")
         run("reproduction.txt", pin + [PY, "-c", MEASURE, ROOT / "tests", str(args.delay)],
             {"PYTHONPATH": str(reviewed / "src")},
             "3a. wall-time stale detection, reviewed source (runtime delay: the warm-up blocks the owner)")

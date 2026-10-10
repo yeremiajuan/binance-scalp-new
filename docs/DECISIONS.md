@@ -347,5 +347,6 @@ S2. **Owner lag is measured and blocks new entries.** For each processed input t
 S3. **Tests wait for observable conditions.** Threaded runner tests no longer assume work fits a fixed wall-clock
     window (`run_seconds=6` failed on the VPS because the warm-up alone used it). They poll read-only state and
     the control channel with bounded deadlines (120 s) and stop the owner through the real control channel.
+    Polling treats a database whose file exists but whose schema has not committed yet as "not ready".
     `PAPERBOT_TEST_COMMIT_DELAY_S` emulates a slow disk for any test run.
 

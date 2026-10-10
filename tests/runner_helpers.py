@@ -16,6 +16,27 @@ from paperbot.storage import Storage
 from paperbot_net.control import send_control
 from paperbot_net.runner import run_forward
 
+
+def poll_rows(state, sql: str, args: tuple = ()) -> list[dict]:
+    """Rows of a read-only query while the runner may still be creating the database: a missing file, or a file
+    whose schema transaction has not committed yet, means "not ready" (no rows), never an error."""
+    import sqlite3
+
+    from conftest import rows
+
+    if not state.exists():
+        return []
+    try:
+        return rows(state, sql, args)
+    except sqlite3.OperationalError:
+        return []
+
+
+def poll_count(state, sql: str, args: tuple = ()) -> int:
+    r = poll_rows(state, sql, args)
+    return r[0]["n"] if r else 0
+
+
 DEADLINE_S = 120.0  # generous upper bound for a 1-vCPU host with slow disk; conditions usually hold in seconds
 
 

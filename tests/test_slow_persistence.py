@@ -13,7 +13,7 @@ import time
 
 from conftest import report, rows, write_forward_config
 from fake_binance import FakeMarket, FakeRestTransport, Harness, SilentStream, boot
-from runner_helpers import RunnerThread, SlowCommits, wait_for
+from runner_helpers import RunnerThread, SlowCommits, poll_count, poll_rows, wait_for
 
 from paperbot.synthetic import staircase
 from paperbot.timeutil import FIVE_MINUTES_US, US_PER_MS
@@ -27,7 +27,7 @@ MS = US_PER_MS
 
 
 def _health(state) -> list[dict]:
-    return rows(state, "SELECT id, seq, kind, detail FROM health_events ORDER BY id") if state.exists() else []
+    return poll_rows(state, "SELECT id, seq, kind, detail FROM health_events ORDER BY id")
 
 
 def _assert_detected_in_time(timer: SlowCommits, inventory_open: bool) -> list[float]:
@@ -52,7 +52,7 @@ def test_silent_feed_is_detected_promptly_while_a_slow_warmup_is_still_being_com
                               ws_url=f"ws://127.0.0.1:{stream.port}/stream")
         try:
             wait_for(lambda: timer.stale_flips, "a stale-quote transition")
-            wait_for(lambda: rows(state, "SELECT count(*) AS n FROM input_log WHERE event_type = 'candle'")[0]["n"]
+            wait_for(lambda: poll_count(state, "SELECT count(*) AS n FROM input_log WHERE event_type = 'candle'")
                      >= 250, "the slow warm-up to be committed")
             wait_for(lambda: stream.connections >= 2, "the silent connection to be replaced")
         finally:
@@ -110,9 +110,9 @@ def test_open_inventory_on_a_silent_feed_under_slow_persistence_is_held_disclose
             wait_for(lambda: [f for f in timer.stale_flips if f[2]], "a stale transition with inventory open")
             wait_for(lambda: [x for x in _health(state) if x["kind"] == "exit_waiting"
                               and "awaiting_fresh_quote" in x["detail"]], "the exit to wait for fresh data")
-            wait_for(lambda: rows(state, "SELECT count(*) AS n FROM orders WHERE purpose = 'exit' AND status != "
-                                         "'pending'")[0]["n"] >= 1, "an exit attempt to end without a fill")
-            wait_for(lambda: rows(state, "SELECT count(*) AS n FROM input_log WHERE event_type = 'candle'")[0]["n"]
+            wait_for(lambda: poll_count(state, "SELECT count(*) AS n FROM orders WHERE purpose = 'exit' AND status != "
+                                         "'pending'") >= 1, "an exit attempt to end without a fill")
+            wait_for(lambda: poll_count(state, "SELECT count(*) AS n FROM input_log WHERE event_type = 'candle'")
                      - before >= 450, "the restart backfill to be committed")
         finally:
             code = runner.stop()

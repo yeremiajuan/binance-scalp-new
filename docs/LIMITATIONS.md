@@ -185,9 +185,12 @@ expect `clock_unsynced` until the first server-time answer; the reconnect-gap an
 without auto-answering the new continuity check, so they still exercise the gap backfill and the backfill timeout.
 
 The VPS review of `bd43c0a` found a failing test (`test_silent_open_stream_is_detected_without_any_message`, 2
-heartbeats versus 4; under cProfile `quotes_stale` absent). Cause: both a fragile fixed-window test and a runtime
-delay (the warm-up was committed in one blocking call, ~5 s at ~16 ms per commit). Fixed by readiness-based tests
-and chunked backfill application with owner-lag disclosure (decisions S1-S3); regression tests
+heartbeats versus 4; under cProfile `quotes_stale` absent). Cause, reproduced with a slow-disk emulation: mainly a
+runtime delay (the warm-up was committed in one blocking call, ~5 s at ~16 ms per commit, so stale quotes were
+detected 4.8 s late in wall time), compounded by a test that judged the runner inside a fixed 6 s wall-clock window
+and counted heartbeats in it. With the runtime fix alone the original test passes even on a disk twice as slow;
+the test is nevertheless made readiness-based. Fixed by chunked backfill application with owner-lag disclosure and
+readiness-based tests (decisions S1-S3); regression tests
 `tests/test_slow_persistence.py` (2), `test_forward.py::test_chunked_warmup_*`, `::test_owner_lag_*` (2) fail
 against `bd43c0a`; evidence in `evidence/slow-persistence/`.
 

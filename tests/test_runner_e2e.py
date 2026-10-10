@@ -13,7 +13,7 @@ import time
 import pytest
 from conftest import rows, write_forward_config
 from fake_binance import FakeMarket, FakeRestTransport, FakeStream, SilentStream
-from runner_helpers import RunnerThread, wait_for
+from runner_helpers import RunnerThread, poll_count, poll_rows, wait_for
 
 from paperbot.cli import main
 from paperbot.storage import StateLocked
@@ -44,7 +44,7 @@ def test_threaded_runner_reconnects_routes_controls_holds_locks_and_stops_gracef
     try:
         wait_for(lambda: stream.connections >= 2, "the client to reconnect after the server closed the stream")
         wait_for(lambda: _ping(state), "the owner to answer on its control channel")
-        wait_for(lambda: rows(state, "SELECT count(*) AS n FROM input_log WHERE event_type = 'candle'")[0]["n"]
+        wait_for(lambda: poll_count(state, "SELECT count(*) AS n FROM input_log WHERE event_type = 'candle'")
                  >= 290, "the warm-up to be committed")
         # both owner locks are held: a second runner (same path) and a second state (same account) both fail
         with pytest.raises(StateLocked):
@@ -98,7 +98,7 @@ def _ping(state) -> bool:
 
 
 def _health(state) -> list[dict]:
-    return rows(state, "SELECT id, seq, kind, detail FROM health_events ORDER BY id") if state.exists() else []
+    return poll_rows(state, "SELECT id, seq, kind, detail FROM health_events ORDER BY id")
 
 
 def silent_setup(tmp_path, quotes: int = 3):
@@ -135,8 +135,8 @@ def test_silent_open_stream_is_detected_without_any_message(tmp_path):
         wait_for(lambda: [h for h in _health(state) if h["kind"] == "feed_ws_disconnected" and "silent" in
                           h["detail"]], "the client to close the silent connection itself")
         wait_for(lambda: stream.connections >= 2, "a reconnect")
-        wait_for(lambda: rows(state, "SELECT count(*) AS n FROM input_log WHERE event_type = 'heartbeat' AND "
-                                     "seq > ?", (stale["seq"],))[0]["n"] >= 4,
+        wait_for(lambda: poll_count(state, "SELECT count(*) AS n FROM input_log WHERE event_type = 'heartbeat' AND "
+                                     "seq > ?", (stale["seq"],)) >= 4,
                  "4 heartbeats after the stale detection (the clock advances with no message)")
     finally:
         code = runner.stop()
