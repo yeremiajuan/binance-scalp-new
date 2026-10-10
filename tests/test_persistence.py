@@ -263,11 +263,12 @@ def test_incompatible_config_input_schema_and_corruption_halt(tmp_path, cfg_path
     with pytest.raises(StateError, match="configuration changed"):
         resume(tmp_path, changed)
     inp = tmp_path / "state.jsonl"
-    original = inp.read_text()
-    inp.write_text(original + json.dumps({"type": "heartbeat", "id": "extra", "recv": "2026-10-01T20:00:00Z"}) + "\n")
+    original = inp.read_text(encoding="utf-8")
+    inp.write_text(original + json.dumps({"type": "heartbeat", "id": "extra", "recv": "2026-10-01T20:00:00Z"}) + "\n",
+                   encoding="utf-8", newline="\n")
     with pytest.raises(ReconciliationError, match="input_sha256 mismatch"):
         resume(tmp_path, cfg_path)
-    inp.write_text(original)
+    inp.write_text(original, encoding="utf-8", newline="\n")
     assert dump_db(db) == before
     conn = sqlite3.connect(db)
     conn.execute("UPDATE meta SET value = '999' WHERE key = 'schema_version'")

@@ -7,7 +7,8 @@ separately authorized, on the machine that will host the trial.
 ## Before starting
 
 1. Confirm the facts this repository cannot verify:
-   - the OS (Linux was exercised; macOS untested; Windows unsupported);
+   - the OS (Linux was exercised; on Windows, first run `scripts\verify_windows.py` and follow
+     `docs/WINDOWS.md`, which has the PowerShell version of every command below; macOS untested);
    - that the machine stays awake and on mains power for 24 h;
    - local disk with at least 5 GB free;
    - an NTP-synchronized clock;

@@ -10,84 +10,16 @@ from __future__ import annotations
 import json
 import threading
 import time
-import urllib.parse
-from decimal import Decimal
 
 import pytest
 from conftest import rows, write_forward_config
-from fake_binance import FakeMarket, ws_avg, ws_book, ws_ref
-from websockets.exceptions import ConnectionClosed
-from websockets.sync.server import serve
+from fake_binance import FakeMarket, FakeRestTransport, FakeStream, ws_book
 
 from paperbot.cli import main
 from paperbot.storage import StateLocked
 from paperbot.synthetic import staircase
 from paperbot.timeutil import FIVE_MINUTES_US
-from paperbot_net.rest import HttpResponse
 from paperbot_net.runner import run_forward
-
-
-class FakeRestTransport:
-    def __init__(self, market: FakeMarket):
-        self.market = market
-        self.urls: list[str] = []
-
-    def get(self, url: str) -> HttpResponse:
-        self.urls.append(url)
-        parsed = urllib.parse.urlparse(url)
-        assert parsed.scheme == "https" and parsed.hostname == "api.binance.com"
-        q = {k: v[0] for k, v in urllib.parse.parse_qs(parsed.query).items()}
-        for k in ("startTime", "endTime", "limit"):
-            if k in q:
-                q[k] = int(q[k])
-        name = parsed.path.rsplit("/", 1)[-1]
-        now = time.time_ns() // 1000
-        if name == "exchangeInfo":
-            body = self.market.info
-        elif name == "executionRules":
-            body = self.market.rules
-        else:
-            body = self.market.answer(name, q, now)
-        return HttpResponse(200, {"x-mbx-used-weight-1m": "30"}, json.dumps(body).encode())
-
-
-class FakeStream:
-    """Local market-stream server: quotes every 100 ms; drops the first connection after ~1 s."""
-
-    def __init__(self, mid: Decimal):
-        self.mid = mid
-        self.connections = 0
-        self.u = 10_000
-        self.stop = threading.Event()
-        self.server = serve(self.handler, "127.0.0.1", 0)
-        self.port = self.server.socket.getsockname()[1]
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-        self.thread.start()
-
-    def handler(self, ws):
-        try:
-            self._serve(ws)
-        except ConnectionClosed:
-            pass  # the client went away (graceful stop)
-
-    def _serve(self, ws):
-        self.connections += 1
-        first = self.connections == 1
-        now_ms = time.time_ns() // 1_000_000
-        ws.send(ws_avg(self.mid, now_ms))
-        ws.send(ws_ref(None, now_ms))
-        sent = 0
-        while not self.stop.is_set():
-            self.u += 1
-            ws.send(ws_book(self.u, self.mid))
-            sent += 1
-            if first and sent >= 10:
-                return  # server-side close: the client must reconnect
-            time.sleep(0.1)
-
-    def close(self):
-        self.stop.set()
-        self.server.shutdown()
 
 
 @pytest.fixture
@@ -158,7 +90,7 @@ def test_threaded_runner_reconnects_routes_controls_holds_locks_and_stops_gracef
     assert raw and raw[0].stat().st_size > 500
     import gzip
 
-    lines = gzip.open(raw[0], "rt").read().splitlines()
+    lines = gzip.open(raw[0], "rt", encoding="utf-8").read().splitlines()
     sources = {json.loads(x)["source"] for x in lines}
     assert {"ws", "ws_status", "rest"} <= sources and len(lines) > 20  # every raw frame/response is kept
     assert all(u.startswith("https://api.binance.com/api/v3/") for u in transport.urls)

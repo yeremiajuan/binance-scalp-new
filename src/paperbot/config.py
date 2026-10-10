@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import tomllib
 from dataclasses import dataclass
 from decimal import Decimal
@@ -47,7 +48,7 @@ _FORWARD = {
     "rest_weight_fraction": ("dec", "0.5"),
     "daily_summary_local": ("str", "00:05"),
     "recordings_dir": ("path", "recordings"),
-    "profile_lock_dir": ("path", "~/.local/state/paperbot/locks"),
+    "profile_lock_dir": ("path", "default"),  # "default": the per-user directory (see paperbot.userdirs)
 }
 _TELEGRAM = {
     "enabled": ("bool", False),
@@ -386,10 +387,15 @@ def _parse_optional(data: dict, base_dir: Path | None) -> dict[str, dict[str, ob
             elif kind == "path":
                 if not isinstance(raw, str) or not raw:
                     raise ConfigError(f"{field_name}: expected a path string")
+                if key == "profile_lock_dir" and raw == "default":
+                    from .userdirs import default_profile_lock_dir
+
+                    vals[key] = default_profile_lock_dir()
+                    continue
                 pth = Path(raw).expanduser()
                 if base_dir is not None and not pth.is_absolute():
                     pth = base_dir / pth
-                vals[key] = str(pth)
+                vals[key] = os.path.normpath(str(pth))
             else:
                 vals[key] = _parse_value(kind, raw, field_name)
         out[section] = vals

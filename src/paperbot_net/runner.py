@@ -5,7 +5,7 @@ only one that touches the engine or writes the database:
 
 * ``StreamFeed`` (WebSocket frames and connection status),
 * ``RestWorker`` (warm-up/backfill klines, metadata, references, server time; rate-limit aware),
-* ``ControlServer`` (local Unix socket next to the state file: kill/reset/stop/ping),
+* ``ControlServer`` (``control.py``: authenticated local socket/named pipe: kill/reset/stop/ping),
 * ``Notifier`` (optional Telegram; reads the outbox read-only and reports delivery results back).
 
 Items are stamped with a monotonic-derived UTC clock when they are queued, so receipt times never go backwards.
@@ -17,7 +17,6 @@ import json
 import os
 import queue
 import signal
-import socket
 import threading
 import time
 import uuid
@@ -30,6 +29,7 @@ from paperbot.recorded import code_revision, manifest_items, open_forward
 from paperbot.storage import ProfileLock, StateLock
 from paperbot.timeutil import US_PER_S
 
+from .control import ControlServer
 from .rest import PublicRest, RateLimited, RestError, Throttled, UrllibTransport
 from .ws import StreamFeed, check_websockets, stream_url
 
@@ -207,76 +207,6 @@ class RestWorker(threading.Thread):
                 self.request("referencePrice", {"symbol": "BTCUSDT"})
 
 
-def control_socket_path(state_path: str) -> str:
-    return os.path.realpath(state_path) + ".ctl"
-
-
-class ControlServer(threading.Thread):
-    """Local-only control channel (Unix socket, mode 0600). Requests are executed by the owner thread."""
-
-    def __init__(self, path: str, out: StampedQueue, stop_event: threading.Event):
-        super().__init__(name="paperbot-control", daemon=True)
-        self.path = path
-        self.out = out
-        self.stop_event = stop_event
-        if os.path.exists(path):
-            os.unlink(path)  # safe: we hold the state lock, so no other owner is listening
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        old = os.umask(0o177)
-        try:
-            self.sock.bind(path)
-        finally:
-            os.umask(old)
-        os.chmod(path, 0o600)
-        self.sock.listen(4)
-        self.sock.settimeout(0.5)
-
-    def run(self) -> None:
-        while not self.stop_event.is_set():
-            try:
-                conn, _ = self.sock.accept()
-            except TimeoutError:
-                continue
-            except OSError:
-                break
-            with conn:
-                conn.settimeout(10)
-                try:
-                    req = json.loads(conn.makefile("r").readline() or "{}")
-                    reply: queue.Queue = queue.Queue(maxsize=1)
-                    self.out.put("control", {**req, "_reply": reply})
-                    try:
-                        resp = reply.get(timeout=15)
-                    except queue.Empty:
-                        resp = {"ok": False, "error": "owner did not answer within 15 s"}
-                except (ValueError, OSError) as exc:
-                    resp = {"ok": False, "error": f"bad request: {exc}"}
-                try:
-                    conn.sendall((json.dumps(resp) + "\n").encode())
-                except OSError:
-                    pass
-
-    def close(self) -> None:
-        try:
-            self.sock.close()
-        finally:
-            if os.path.exists(self.path):
-                os.unlink(self.path)
-
-
-def send_control(state_path: str, request: dict, timeout: float = 20.0) -> dict:
-    """Client side of the local control channel (used by the CLI when the runner owns the state)."""
-    path = control_socket_path(state_path)
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"no control socket at {path}")
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
-        s.settimeout(timeout)
-        s.connect(path)
-        s.sendall((json.dumps(request) + "\n").encode())
-        data = s.makefile("r").readline()
-    return json.loads(data) if data else {"ok": False, "error": "no reply"}
-
-
 def run_forward(config_path: str, state_path: str, *, run_seconds: float | None = None, transport=None,
                 ws_url: str | None = None, ws_connect=None, notifier_factory=None, install_signals: bool = True,
                 log=print) -> int:
@@ -311,7 +241,7 @@ def run_forward(config_path: str, state_path: str, *, run_seconds: float | None 
                           stop_event=stop_event, initial_backoff_s=fwd.reconnect_initial_ms / 1000,
                           max_backoff_s=fwd.reconnect_max_ms / 1000, silence_s=fwd.ws_silence_s,
                           **({"connect": ws_connect} if ws_connect else {}))
-        control = ControlServer(control_socket_path(lock.canonical), inbox, stop_event)
+        control = ControlServer(lock.canonical, inbox, stop_event)
         notifier = notifier_factory(cfg, lock.canonical, inbox, stop_event) if notifier_factory else None
         stop_reason = {"why": None}
 
@@ -320,8 +250,13 @@ def run_forward(config_path: str, state_path: str, *, run_seconds: float | None 
             stop_event.set()
 
         if install_signals:
-            signal.signal(signal.SIGINT, on_signal)
-            signal.signal(signal.SIGTERM, on_signal)
+            # Ctrl+C (SIGINT) everywhere; SIGTERM on Linux/macOS; Ctrl+Break (SIGBREAK) on Windows. `paperbot stop`
+            # works on every platform through the control channel. Closing a Windows console window or killing the
+            # process is a crash: the OS releases both locks and the next start reconciles and recovers.
+            for name in ("SIGINT", "SIGTERM", "SIGBREAK"):
+                sig = getattr(signal, name, None)
+                if sig is not None:
+                    signal.signal(sig, on_signal)
         code = 0
         deadline = None if run_seconds is None else time.monotonic() + run_seconds
         try:
@@ -329,7 +264,7 @@ def run_forward(config_path: str, state_path: str, *, run_seconds: float | None 
             for t in (worker, feed, control) + ((notifier,) if notifier else ()):
                 t.start()
             log(f"PAPER | PUBLIC DATA | forward runner {session_id} ({'restart' if restart else 'start'}) owns "
-                f"{lock.canonical}; control socket {control.path}")
+                f"{lock.canonical}; control endpoint {control.path}")
             tick_s = min(fwd.heartbeat_ms, fwd.quote_sample_ms) / 1000 / 2
             while not stop_event.is_set() and not session.stopped:
                 if deadline is not None and time.monotonic() >= deadline:

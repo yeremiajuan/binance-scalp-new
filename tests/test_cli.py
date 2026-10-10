@@ -50,8 +50,8 @@ def test_live_mode_in_config_is_rejected(tmp_path, override, capsys):
 @pytest.mark.parametrize("extra", ['api_key = "abc"', 'live = true', 'binance_secret = "x"', 'endpoint = "x"'])
 def test_credential_or_live_keys_are_rejected(tmp_path, extra):
     cfg = write_config(tmp_path)
-    text = cfg.read_text().replace("[run]\n", f"[run]\n{extra}\n")
-    cfg.write_text(text)
+    text = cfg.read_text(encoding="utf-8").replace("[run]\n", f"[run]\n{extra}\n")
+    cfg.write_text(text, encoding="utf-8", newline="\n")
     with pytest.raises(LiveModeRejected):
         load_config(cfg)
 
@@ -70,7 +70,8 @@ def test_unsupported_configuration_rejected(tmp_path, override, msg, capsys):
 
 def test_toml_float_rejected(tmp_path, capsys):
     cfg = write_config(tmp_path)
-    cfg.write_text(cfg.read_text().replace('buy_fee_bps = "10"', "buy_fee_bps = 10.0"))
+    cfg.write_text(cfg.read_text(encoding="utf-8").replace('buy_fee_bps = "10"', "buy_fee_bps = 10.0"),
+                   encoding="utf-8", newline="\n")
     assert main(["validate-config", str(cfg)]) == 2
     assert "not TOML floats" in capsys.readouterr().err
 
@@ -141,6 +142,6 @@ def test_source_has_no_network_credential_signer_or_order_endpoint_path():
         r"binance|ccxt|telegram)\b", re.M)
     forbidden_text = re.compile(r"api\.binance|/api/v3/order|X-MBX-APIKEY|signature=|testnet\.binance", re.I)
     for f in src.rglob("*.py"):
-        text = f.read_text()
+        text = f.read_text(encoding="utf-8")
         assert not forbidden_imports.search(text), f
         assert not forbidden_text.search(text), f

@@ -7,8 +7,14 @@ strategy reaches warm-up and signals. Payload shapes follow binance-spot-api-doc
 from __future__ import annotations
 
 import json
+import threading
+import time
+import urllib.parse
 from decimal import Decimal
 from pathlib import Path
+
+from websockets.exceptions import ConnectionClosed
+from websockets.sync.server import serve
 
 from paperbot.forward import ForwardSession, Item
 from paperbot.money import dtext
@@ -16,6 +22,7 @@ from paperbot.recorded import open_forward
 from paperbot.storage import StateLock
 from paperbot.synthetic import BarSpec, breakout_bar, range_bars, staircase
 from paperbot.timeutil import MINUTE_US, US_PER_MS, parse_ts
+from paperbot_net.rest import HttpResponse
 
 T0 = parse_ts("2026-10-01T12:00:00Z")
 MS = US_PER_MS
@@ -233,4 +240,69 @@ def boot(h: Harness, now: int, ref_value=None) -> int:
     return t
 
 
-__all__ = ["FakeMarket", "Harness", "boot", "standard_bars", "breakout_bar", "range_bars", "T0", "MINUTE_US", "MS"]
+class FakeRestTransport:
+    def __init__(self, market: FakeMarket):
+        self.market = market
+        self.urls: list[str] = []
+
+    def get(self, url: str) -> HttpResponse:
+        self.urls.append(url)
+        parsed = urllib.parse.urlparse(url)
+        assert parsed.scheme == "https" and parsed.hostname == "api.binance.com"
+        q = {k: v[0] for k, v in urllib.parse.parse_qs(parsed.query).items()}
+        for k in ("startTime", "endTime", "limit"):
+            if k in q:
+                q[k] = int(q[k])
+        name = parsed.path.rsplit("/", 1)[-1]
+        now = time.time_ns() // 1000
+        if name == "exchangeInfo":
+            body = self.market.info
+        elif name == "executionRules":
+            body = self.market.rules
+        else:
+            body = self.market.answer(name, q, now)
+        return HttpResponse(200, {"x-mbx-used-weight-1m": "30"}, json.dumps(body).encode())
+
+
+class FakeStream:
+    """Local market-stream server: quotes every 100 ms; drops the first connection after ~1 s (unless told not to)."""
+
+    def __init__(self, mid: Decimal, drop_first: bool = True):
+        self.mid = mid
+        self.drop_first = drop_first
+        self.connections = 0
+        self.u = 10_000
+        self.stop = threading.Event()
+        self.server = serve(self.handler, "127.0.0.1", 0)
+        self.port = self.server.socket.getsockname()[1]
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def handler(self, ws):
+        try:
+            self._serve(ws)
+        except ConnectionClosed:
+            pass  # the client went away (graceful stop)
+
+    def _serve(self, ws):
+        self.connections += 1
+        first = self.connections == 1 and self.drop_first
+        now_ms = time.time_ns() // 1_000_000
+        ws.send(ws_avg(self.mid, now_ms))
+        ws.send(ws_ref(None, now_ms))
+        sent = 0
+        while not self.stop.is_set():
+            self.u += 1
+            ws.send(ws_book(self.u, self.mid))
+            sent += 1
+            if first and sent >= 10:
+                return  # server-side close: the client must reconnect
+            time.sleep(0.1)
+
+    def close(self):
+        self.stop.set()
+        self.server.shutdown()
+
+
+__all__ = ["FakeMarket", "FakeRestTransport", "FakeStream", "Harness", "boot", "standard_bars", "breakout_bar",
+           "range_bars", "T0", "MINUTE_US", "MS"]

@@ -101,7 +101,7 @@ class Scenario:
 
     def write(self, path: str | Path) -> Path:
         p = Path(path)
-        p.write_text(self.text(), encoding="utf-8")
+        p.write_text(self.text(), encoding="utf-8", newline="\n")
         return p
 
     def raw_events(self) -> list[RawEvent]:

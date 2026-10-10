@@ -96,9 +96,9 @@ def test_invalid_quotes_are_rejected_and_never_fill(tmp_path, cfg_path):
 def test_malformed_line_is_committed_as_rejected_and_cursor_advances(tmp_path, cfg_path):
     sc, bars = warm_scenario(1)
     inp = sc.write(tmp_path / "state.jsonl")
-    text = inp.read_text().splitlines()
+    text = inp.read_text(encoding="utf-8").splitlines()
     text.insert(3, "{not json")
-    inp.write_text("\n".join(text) + "\n")
+    inp.write_text("\n".join(text) + "\n", encoding="utf-8", newline="\n")
     from paperbot.replay import new_run
 
     new_run(str(cfg_path), str(inp), str(tmp_path / "state.sqlite"))

@@ -114,18 +114,31 @@ def _route_control(state: str, request: dict, direct) -> str:
         direct()
         return "direct"
     except StateLocked:
-        from paperbot_net.runner import send_control
+        from paperbot_net.control import CONTROL_ERRORS, send_control
 
         try:
             reply = send_control(state, request)
-        except (FileNotFoundError, ConnectionError, OSError):
-            raise StateLocked(f"state {state} is locked by another process that has no control socket") from None
+        except CONTROL_ERRORS as exc:
+            raise StateLocked(f"state {state} is locked by another process that has no reachable control endpoint "
+                              f"({type(exc).__name__}: {exc})") from None
         if not reply.get("ok"):
             raise ValueError(f"owner rejected the control: {reply.get('error')}") from None
         return "routed to the active forward runner: " + str(reply.get("result"))
 
 
+def _utf8_redirected_output() -> None:
+    """Redirected output is UTF-8 on every platform (Windows would otherwise use the ANSI code page)."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if not stream.isatty():
+                stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
 def main(argv: list[str] | None = None, *, wall_clock=None) -> int:
+    if argv is None:  # console entry point (tests pass argv explicitly)
+        _utf8_redirected_output()
     argv = list(sys.argv[1:] if argv is None else argv)
     wall_clock = wall_clock or (lambda: datetime.now(timezone.utc).isoformat(timespec="milliseconds"))
     try:
@@ -182,11 +195,11 @@ def main(argv: list[str] | None = None, *, wall_clock=None) -> int:
             return run_forward(args.config, args.state, run_seconds=args.run_seconds,
                                notifier_factory=notifier_factory)
         if args.cmd == "stop":
-            from paperbot_net.runner import send_control
+            from paperbot_net.control import CONTROL_ERRORS, send_control
 
             try:
                 reply = send_control(args.state, {"cmd": "stop", "reason": args.reason})
-            except (FileNotFoundError, ConnectionError, OSError) as exc:
+            except CONTROL_ERRORS as exc:
                 raise StateError(f"no active forward runner for {args.state}: {exc}") from None
             print(f"PAPER | stop: {reply}")
             return 0 if reply.get("ok") else 4

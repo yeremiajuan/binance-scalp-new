@@ -11,12 +11,13 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 import sys
+from pathlib import Path
 
 RUN_DESCRIPTION_TABLES = {"meta", "manifest", "sessions", "outbox"}
 
 
 def digests(path: str) -> dict[str, tuple[int, str]]:
-    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    conn = sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True)
     out = {}
     for (table,) in conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"):
         rows = conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall()

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 import sys
+import tempfile
 from decimal import Decimal
 from pathlib import Path
 
@@ -12,6 +14,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 FULL_METADATA = ROOT / "fixtures" / "exchange_info_btcusdt_synthetic.json"
+
+
+@pytest.fixture(autouse=True)
+def isolated_control_dir(monkeypatch):
+    """Each test gets its own short control directory (inherited by subprocesses), never the user's real one."""
+    d = tempfile.mkdtemp(prefix="pbc-")
+    monkeypatch.setenv("PAPERBOT_CONTROL_DIR", d)
+    yield d
+    shutil.rmtree(d, ignore_errors=True)
 
 BASE_CONFIG = {
     "run": {"mode": "paper", "account_id": "test-account", "symbol": "BTCUSDT", "strategy": "B20-T5-v1"},
@@ -67,7 +78,7 @@ def write_config(directory: Path, overrides: dict | None = None, metadata: dict 
         metadata = minimal_metadata()
     if isinstance(metadata, dict):
         mpath = directory / f"{name}.metadata.json"
-        mpath.write_text(json.dumps(metadata), encoding="utf-8")
+        mpath.write_text(json.dumps(metadata), encoding="utf-8", newline="\n")
     else:
         mpath = metadata
     lines = []
@@ -76,12 +87,12 @@ def write_config(directory: Path, overrides: dict | None = None, metadata: dict 
         lines += [f"{k} = {_toml_value(v)}" for k, v in table.items()]
     lines += ["[metadata]", f"path = {json.dumps(str(mpath))}"]
     p = directory / name
-    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     return p
 
 
 def rows(db: Path, sql: str, args: tuple = ()) -> list[dict]:
-    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    conn = sqlite3.connect(Path(db).resolve().as_uri() + "?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
         return [dict(r) for r in conn.execute(sql, args)]
@@ -91,7 +102,7 @@ def rows(db: Path, sql: str, args: tuple = ()) -> list[dict]:
 
 def dump_db(db: Path) -> dict:
     """Every table's full contents, for exact equivalence comparisons."""
-    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    conn = sqlite3.connect(Path(db).resolve().as_uri() + "?mode=ro", uri=True)
     try:
         tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
         return {t: conn.execute(f"SELECT * FROM {t} ORDER BY 1").fetchall() for t in tables}
@@ -125,12 +136,12 @@ def write_forward_config(directory: Path, overrides: dict | None = None, forward
     base = write_config(directory, overrides, name=name)
     fwd = {"recordings_dir": str(directory / "recordings"), "profile_lock_dir": str(directory / "locks"),
            **(forward or {})}
-    text = base.read_text()
+    text = base.read_text(encoding="utf-8")
     text += "[forward]\n" + "".join(f"{k} = {_toml_value(v)}\n" for k, v in fwd.items())
     if telegram:
         text += "[telegram]\n" + "".join(
             f"{k} = {json.dumps(v) if isinstance(v, list) else _toml_value(v)}\n" for k, v in telegram.items())
-    base.write_text(text)
+    base.write_text(text, encoding="utf-8", newline="\n")
     return base
 
 

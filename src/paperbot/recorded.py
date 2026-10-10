@@ -157,7 +157,7 @@ def export_recording(state_path: str, out_path: str) -> dict:
     finally:
         store.close()
     lines = [json.dumps(header, sort_keys=True)] + [line for _, line in payloads]
-    Path(out_path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    Path(out_path).write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     return {"events": len(payloads), "controls": len(controls), "sha256": hashlib.sha256(
         Path(out_path).read_bytes()).hexdigest()}
 

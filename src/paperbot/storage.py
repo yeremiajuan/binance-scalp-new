@@ -1,22 +1,24 @@
 """SQLite persistence, the canonical state-path lock, and atomic commits.
 
-* Local-disk SQLite only. Network filesystems are refused (best-effort check
-  on Linux via /proc/self/mountinfo).
+* Local-disk SQLite only. Network filesystems are refused (Linux: /proc/self/mountinfo;
+  Windows: UNC paths and GetDriveTypeW == DRIVE_REMOTE).
 * Rollback journal (``journal_mode=DELETE``) with ``synchronous=FULL`` so the
   database file alone is a consistent artifact, plus foreign keys.
 * Monetary values are stored as Decimal TEXT; there is no REAL column.
 * One input event == one ``BEGIN IMMEDIATE`` .. ``COMMIT``: input log, cursor,
   decision, reservation, order, fill, ledger deltas, position/risk/health
   transitions and the engine snapshot are written together or not at all.
-* The OS lock is ``flock`` on ``<realpath(state)>.lock``, taken before the
-  database is opened for writing and held for the process lifetime. Symlink and
-  relative-path spellings resolve to the same lock; a hard-linked database is
-  refused. The kernel releases the lock when a process dies.
+* The OS lock (``paperbot.oslock``: flock on Linux, LockFileEx on Windows) is on
+  ``<realpath(state)>.lock``, taken before the database is opened for writing and
+  held for the process lifetime. Symlink, junction, relative, ``..``, short-name
+  and (Windows) letter-case spellings resolve to the same lock; a hard-linked
+  database is refused. The kernel releases the lock when a process dies.
 """
 
 from __future__ import annotations
 
 import json
+import ntpath
 import os
 import sqlite3
 from decimal import Decimal
@@ -26,6 +28,7 @@ from . import codec
 from .engine import EngineState, Recorder, detail_json
 from .events import RawEvent
 from .money import dtext
+from .oslock import LockUnavailable, OsLock
 
 SCHEMA_VERSION = "2"
 # v1 (Phase 1) databases remain readable and resumable for synthetic replay: Phase 2 tables are additive and are
@@ -116,15 +119,31 @@ class StateLocked(StateError):
 
 
 def canonical_state_path(path: str | os.PathLike) -> str:
+    """Absolute path with symlinks/junctions and ``..`` resolved (on Windows also 8.3 short names and the on-disk
+    letter case of existing components). Every spelling of one database maps to one lock file."""
     return os.path.realpath(os.path.abspath(os.fspath(path)))
 
 
+def readonly_uri(path: str | os.PathLike) -> str:
+    """SQLite read-only URI for a filesystem path: ``file:///C:/...`` on Windows, ``file:///home/...`` on Linux, with
+    characters such as ``?``, ``#``, ``%`` and spaces percent-encoded."""
+    return Path(os.path.abspath(os.fspath(path))).as_uri() + "?mode=ro"
+
+
+def path_key(canonical: str) -> str:
+    """Comparison key for a canonical path: case-folded on Windows, where paths are case-insensitive."""
+    return os.path.normcase(canonical)
+
+
 def _check_local_filesystem(directory: str) -> None:
+    if os.name == "nt":
+        _check_local_windows(directory)
+        return
     mountinfo = Path("/proc/self/mountinfo")
     if not mountinfo.exists():
-        return  # non-Linux: documented limitation, verify the user's OS before a trial
+        return  # macOS: documented limitation (unverified)
     best, fstype = "", None
-    for line in mountinfo.read_text().splitlines():
+    for line in mountinfo.read_text(encoding="utf-8", errors="replace").splitlines():
         parts = line.split(" - ")
         if len(parts) != 2:
             continue
@@ -137,49 +156,58 @@ def _check_local_filesystem(directory: str) -> None:
         raise StateError(f"state directory {directory} is on a network filesystem ({fstype}); use a local disk")
 
 
+DRIVE_REMOTE = 4  # GetDriveTypeW
+
+
+def _check_local_windows(directory: str, drive_type=None) -> None:
+    """Refuse UNC paths and network (mapped) drives. realpath already turns a mapped drive into its UNC target."""
+    plain = directory
+    for prefix in ("\\\\?\\", "\\\\.\\"):  # extended-length / device prefixes: look at what follows them
+        if plain.startswith(prefix):
+            plain = plain[len(prefix):]
+            break
+    if plain.upper().startswith("UNC\\") or plain.startswith("\\\\"):
+        raise StateError(f"state directory {directory} is a network (UNC) path; use a local disk")
+    drive, _ = ntpath.splitdrive(plain)
+    if drive_type is None:
+        import ctypes
+
+        drive_type = ctypes.windll.kernel32.GetDriveTypeW
+    kind = drive_type(drive + "\\")
+    if kind == DRIVE_REMOTE:
+        raise StateError(f"state directory {directory} is on a network drive ({drive}); use a local disk")
+
+
 class StateLock:
     """Exclusive OS-backed lock for one canonical state path, held for the process lifetime."""
 
     def __init__(self, state_path: str | os.PathLike):
-        try:
-            import fcntl  # noqa: F401
-        except ImportError as exc:  # pragma: no cover - Windows
-            raise StateError("process locking currently requires Linux/macOS (fcntl.flock)") from exc
         self.canonical = canonical_state_path(state_path)
         self.lock_path = self.canonical + ".lock"
-        self.fd: int | None = None
+        self._os = OsLock(self.lock_path, f"pid={os.getpid()}\n")
+
+    @property
+    def held(self) -> bool:
+        return self._os.held
 
     def acquire(self) -> StateLock:
-        import fcntl
-
         directory = os.path.dirname(self.canonical)
         if not os.path.isdir(directory):
             raise StateError(f"state directory does not exist: {directory}")
         _check_local_filesystem(directory)
-        fd = os.open(self.lock_path, os.O_RDWR | os.O_CREAT, 0o600)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            os.close(fd)
-            raise StateLocked(
-                f"state {self.canonical} is locked by another process; refusing to mutate it"
-            ) from None
+            got = self._os.try_acquire()
+        except LockUnavailable as exc:
+            raise StateError(str(exc)) from None
+        if not got:
+            raise StateLocked(f"state {self.canonical} is locked by another process; refusing to mutate it")
         if os.path.exists(self.canonical) and os.stat(self.canonical).st_nlink > 1:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-            os.close(fd)
+            self._os.release()
             raise StateError(f"state {self.canonical} has multiple hard links; refusing an aliased database")
-        os.ftruncate(fd, 0)
-        os.write(fd, f"pid={os.getpid()}\n".encode())  # informational only; the flock is the guard
-        self.fd = fd
         return self
 
     def release(self) -> None:
-        if self.fd is not None:
-            import fcntl
-
-            fcntl.flock(self.fd, fcntl.LOCK_UN)
-            os.close(self.fd)
-            self.fd = None
+        self._os.release()
 
     def __enter__(self) -> StateLock:
         return self.acquire()
@@ -196,34 +224,29 @@ class ProfileLock:
         import hashlib
 
         self.account_id = account_id
-        self.lock_dir = os.path.realpath(os.path.expanduser(os.fspath(lock_dir)))
+        self.lock_dir = canonical_state_path(os.path.expanduser(os.fspath(lock_dir)))
         digest = hashlib.sha256(account_id.encode()).hexdigest()[:24]
         self.lock_path = os.path.join(self.lock_dir, f"account-{digest}.lock")
-        self.fd: int | None = None
+        self._os = OsLock(self.lock_path, f"pid={os.getpid()} account={account_id}\n")
+
+    @property
+    def held(self) -> bool:
+        return self._os.held
 
     def acquire(self) -> ProfileLock:
-        import fcntl
-
         os.makedirs(self.lock_dir, mode=0o700, exist_ok=True)
-        fd = os.open(self.lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        _check_local_filesystem(self.lock_dir)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            os.close(fd)
+            got = self._os.try_acquire()
+        except LockUnavailable as exc:
+            raise StateError(str(exc)) from None
+        if not got:
             raise StateLocked(f"paper account {self.account_id!r} is already owned by another process "
-                              f"(profile lock {self.lock_path})") from None
-        os.ftruncate(fd, 0)
-        os.write(fd, f"pid={os.getpid()} account={self.account_id}\n".encode())
-        self.fd = fd
+                              f"(profile lock {self.lock_path})")
         return self
 
     def release(self) -> None:
-        if self.fd is not None:
-            import fcntl
-
-            fcntl.flock(self.fd, fcntl.LOCK_UN)
-            os.close(self.fd)
-            self.fd = None
+        self._os.release()
 
     def __enter__(self) -> ProfileLock:
         return self.acquire()
@@ -259,7 +282,7 @@ class Storage:
     @staticmethod
     def _connect(path: str, readonly: bool) -> sqlite3.Connection:
         if readonly:
-            conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, isolation_level=None)
+            conn = sqlite3.connect(readonly_uri(path), uri=True, isolation_level=None)
         else:
             conn = sqlite3.connect(path, isolation_level=None)
             conn.execute("PRAGMA journal_mode=DELETE")
@@ -271,7 +294,7 @@ class Storage:
     @classmethod
     def create(cls, lock: StateLock, meta: dict[str, str], state: EngineState) -> Storage:
         path = lock.canonical
-        if lock.fd is None:
+        if not lock.held:
             raise StateError("lock must be held before creating state")
         if os.path.exists(path) and os.path.getsize(path) > 0:
             raise StateError(
@@ -305,7 +328,7 @@ class Storage:
 
     @classmethod
     def open_existing(cls, lock: StateLock) -> Storage:
-        if lock.fd is None:
+        if not lock.held:
             raise StateError("lock must be held before opening state for writing")
         return cls._open(lock.canonical, readonly=False)
 

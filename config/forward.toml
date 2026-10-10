@@ -57,7 +57,7 @@ rest_timeout_s = 10
 rest_weight_fraction = "0.5"           # stay below half of REQUEST_WEIGHT per minute
 daily_summary_local = "00:05"          # Asia/Jakarta (Telegram only)
 recordings_dir = "../state/recordings" # raw observations (relative to this file)
-profile_lock_dir = "~/.local/state/paperbot/locks"
+profile_lock_dir = "default"  # per-user: %LOCALAPPDATA%\paperbot\locks (Windows), ~/.local/state/paperbot/locks
 
 # Optional monitoring. Disabled by default. The bot token is read from the environment variable named here
 # and is never written to config, database, recordings or logs. Commands are read-only (/status, /positions).

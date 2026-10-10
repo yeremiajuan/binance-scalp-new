@@ -1,0 +1,6 @@
+# Keep LF in the working tree on every OS (Windows git defaults to core.autocrlf=true). Fixtures, recordings and
+# configuration are hashed byte-for-byte, so a CRLF checkout would change their identities.
+* text=auto eol=lf
+*.sqlite binary
+*.gz binary
+*.whl binary

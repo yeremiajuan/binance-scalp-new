@@ -41,7 +41,7 @@ def main(work: str) -> int:
         cli(args)
     print("\n### sessions (rows are written by the threaded runner `paperbot run`; this step-mode demo has none,"
           " see tests/test_runner_e2e.py)")
-    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    conn = sqlite3.connect(Path(db).resolve().as_uri() + "?mode=ro", uri=True)
     for r in conn.execute("SELECT session_id, started_wall, stopped_wall, stop_reason FROM sessions "
                           "ORDER BY started_wall"):
         print(r)

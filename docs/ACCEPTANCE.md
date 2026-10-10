@@ -57,3 +57,26 @@ reconciliation after a tick-size change, persistent REST throttling, websockets 
 tests are listed in `docs/LIMITATIONS.md` (Defects); `evidence/phase2/review_regressions.txt` shows the new tests
 failing against the `87b130b` source and passing on the fix. The 24-hour public-data smoke session remains
 **NOT RUN**.
+
+# Native Windows support → evidence
+
+Self-check by the implementer. The implementation ran on Linux only; every Windows row below is **NOT RUN** until
+`scripts\verify_windows.py` runs on the user's PC and fills `evidence/windows/`. `evidence/platform-linux/` is
+the same script run on Linux (`--allow-non-windows`); it is not Windows evidence.
+
+| # | Requirement | Evidence | Linux | Windows |
+|---|---|---|---|---|
+| 1 | One process owns a state/account; a competing process is refused clearly (exit 3, `LOCKED`, canonical path named) | `tests/test_ownership.py::test_two_competing_owners_one_wins_and_aliases_cannot_bypass`, `::test_account_lock_refuses_a_second_state_path_for_the_same_account`; `test_locking.py`; drill sections 3 | passed | NOT RUN |
+| 2 | Path aliases cannot bypass the locks | Linux: `..`, relative, symlinked file and directory, hard link refused. Windows (in the same tests and the drill): `..`, upper/lower case, directory junction, 8.3 short name, hard link refused; symlinks when the account may create them | passed | NOT RUN |
+| 3 | A crash releases ownership automatically; restart succeeds and reconciles | `test_ownership.py::test_crash_releases_ownership_and_restart_reconciles_and_recovers` (SIGKILL / TerminateProcess, direct control right after, restart with latch kept, reconcile clean); `test_locking.py` (killed holder); drill sections 7-8 | passed | NOT RUN |
+| 4 | OS-backed locks only (no PID file, no existence lock) | `paperbot/oslock.py`; `test_platform.py::test_os_lock_refuses_anything_but_a_native_os_lock` (soft lock and ENOSYS refused), `::test_os_lock_is_exclusive_per_handle...` (stale lock file never blocks); mutation check: making the lock ignore contention fails 8 tests | passed | NOT RUN |
+| 5 | status, positions, stop, kill and reset work while the owner runs; mutations go through the owner | `test_ownership.py::test_controls_are_routed_through_the_running_owner_and_authenticated`; drill sections 2 and 5 | passed | NOT RUN |
+| 6 | Local IPC with access protection; no unauthenticated network endpoint | `paperbot_net/control.py` (Unix socket 0600 in a 0700 dir / local-only named pipe; per-run key; mutual challenge; JSON only; no TCP); `test_platform.py::test_control_requires_the_per_run_key_in_both_directions`, `::test_control_never_reads_a_request_from_an_unauthenticated_client` (mutation check: removing the challenge fails it), `::test_posix_control_files_are_private`, `::test_windows_control_endpoint_is_a_local_named_pipe...` (Windows only); drill `icacls` checks | passed | NOT RUN |
+| 7 | Ctrl+C and the stop command without Unix-only signals | SIGINT/SIGBREAK/SIGTERM handlers; `test_ownership.py::test_graceful_signal_shutdown_then_reconciled_restart` (SIGINT on Linux, CTRL_BREAK_EVENT on Windows); drill section 6; manual Ctrl+C check in `docs/WINDOWS.md` | passed | NOT RUN (Ctrl+C: manual) |
+| 8 | Config paths, recordings, profile locks and SQLite handled on Windows | `profile_lock_dir = "default"` (`test_platform.py::test_profile_lock_dir_default_is_per_user`); `readonly_uri` (`::test_readonly_uri_opens_awkward_paths`); network paths (`::test_windows_network_paths_are_refused`, 6 cases incl. UNC and mapped drives); UTF-8/LF audit; `.gitattributes`; `::test_windows_state_open_close_and_reopen_releases_file_handles` (Windows only) | passed (Windows-only cases skipped) | NOT RUN |
+| 9 | Restart, reconciliation and recovery preserved | full suite (economic, recovery, review-regression tests unchanged); ownership restart tests | passed | NOT RUN |
+| 10 | PowerShell installation and operation instructions | `docs/WINDOWS.md` | provided | not exercised |
+| 11 | One Windows verification script, no Bash/WSL, outputs saved separately | `scripts/verify_windows.py` → `evidence/windows/`; Linux run → `evidence/platform-linux/` | ran (Linux) | NOT RUN |
+| 12 | Strategy, risk, fees, fill assumptions, accounting unchanged; PAPER and public data only | configuration hashes unchanged (`3f9aba57…`, `ec9203a1…`); synthetic replay determinism and mocked recorded-replay comparison IDENTICAL; static scans unchanged | passed | NOT RUN |
+| 13 | Native Windows acceptance | requires execution on actual Windows | — | **NOT RUN** |
+

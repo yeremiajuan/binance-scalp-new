@@ -25,7 +25,7 @@ class InjectedCrash(Exception):
 
 
 def q(db: Path, sql: str) -> list:
-    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    conn = sqlite3.connect(Path(db).resolve().as_uri() + "?mode=ro", uri=True)
     try:
         return conn.execute(sql).fetchall()
     finally:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import signal
 import subprocess
 import sys
 
@@ -24,7 +23,8 @@ HOLDER = (
 
 
 def cli(*args, cwd=None):
-    return subprocess.run([PY, "-m", "paperbot", *args], capture_output=True, text=True, cwd=cwd, timeout=120)
+    return subprocess.run([PY, "-m", "paperbot", *args], capture_output=True, encoding="utf-8", errors="replace",
+                          cwd=cwd, timeout=120)
 
 
 @pytest.fixture
@@ -37,22 +37,36 @@ def account(tmp_path):
 
 
 def hold(path: str, cwd=None) -> subprocess.Popen:
-    p = subprocess.Popen([PY, "-c", HOLDER, path], stdout=subprocess.PIPE, text=True, cwd=cwd)
+    p = subprocess.Popen([PY, "-c", HOLDER, path], stdout=subprocess.PIPE, encoding="utf-8", cwd=cwd)
     line = p.stdout.readline()
     assert line.startswith("locked"), line
     return p
 
 
+def symlink_aliases(tmp, db) -> list[str]:
+    """Symlinked file and directory spellings. Windows allows creating symlinks only with Developer Mode or an
+    elevated shell; without that privilege these spellings are skipped (the case, ``..`` and relative spellings
+    below still run, and directory junctions are covered by tests/test_ownership.py)."""
+    try:
+        os.symlink(db, tmp / "alias.sqlite")
+        os.symlink(tmp, tmp / "dir-alias", target_is_directory=True)
+    except OSError:
+        if os.name != "nt":
+            raise
+        return []
+    return [str(tmp / "alias.sqlite"), str(tmp / "dir-alias" / "state.sqlite")]
+
+
 def test_second_process_and_path_aliases_fail_before_mutation(account):
     tmp, cfg, db = account
-    os.symlink(db, tmp / "alias.sqlite")
-    os.symlink(tmp, tmp / "dir-alias")
+    links = symlink_aliases(tmp, db)
     (tmp / "sub").mkdir()
     holder = hold(str(db))
     try:
         before = dump_db(db)
-        spellings = [str(db), str(tmp / "alias.sqlite"), str(tmp / "dir-alias" / "state.sqlite"),
-                     str(tmp / "sub" / ".." / "state.sqlite")]
+        spellings = [str(db), *links, str(tmp / "sub" / ".." / "state.sqlite")]
+        if os.name == "nt":  # case-insensitive paths: another letter case is the same database
+            spellings.append(str(db).upper())
         for s in spellings:
             r = cli("resume", "--config", str(cfg), "--input", str(tmp / "state.jsonl"), "--state", s)
             assert r.returncode == 3, (s, r.stdout, r.stderr)
@@ -64,15 +78,15 @@ def test_second_process_and_path_aliases_fail_before_mutation(account):
         assert rel.returncode == 3
         assert dump_db(db) == before
         # read-only status works while the owner holds the lock and does not mutate
-        st = cli("status", "--state", str(tmp / "alias.sqlite"))
+        st = cli("status", "--state", spellings[-1])
         assert st.returncode == 0 and st.stdout.startswith("PAPER | SYNTHETIC")
         assert dump_db(db) == before
     finally:
-        holder.send_signal(signal.SIGKILL)
+        holder.kill()  # SIGKILL on Linux, TerminateProcess on Windows: no cleanup code runs in the holder
         holder.wait()
-    # the kernel released the crashed holder's lock; the stale lock file (with its pid text) does not block
+    # the OS released the killed holder's lock; the stale lock file (with its pid text) does not block
     assert (tmp / "state.sqlite.lock").exists()
-    r = cli("resume", "--config", str(cfg), "--input", str(tmp / "state.jsonl"), "--state", str(tmp / "alias.sqlite"))
+    r = cli("resume", "--config", str(cfg), "--input", str(tmp / "state.jsonl"), "--state", spellings[-1])
     assert r.returncode == 0, r.stderr
 
 
@@ -92,7 +106,8 @@ def test_two_simultaneous_replays_create_at_most_one_account(tmp_path):
     inp = rich_scenario().write(tmp_path / "in.jsonl")
     db = tmp_path / "race.sqlite"
     args = [PY, "-m", "paperbot", "replay", "--config", str(cfg), "--input", str(inp), "--state", str(db), "--quiet"]
-    procs = [subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for _ in range(2)]
+    procs = [subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              encoding="utf-8", errors="replace") for _ in range(2)]
     outs = [p.communicate(timeout=120) for p in procs]
     codes = sorted(p.returncode for p in procs)
     assert codes in ([0, 3], [0, 4]), (codes, outs)
@@ -112,7 +127,8 @@ def test_read_only_status_during_a_live_replay_sees_consistent_snapshots(tmp_pat
     inp = rich_scenario().write(tmp_path / "in.jsonl")
     db = tmp_path / "live.sqlite"
     p = subprocess.Popen([PY, "-m", "paperbot", "replay", "--config", str(cfg), "--input", str(inp), "--state",
-                          str(db), "--quiet"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                          str(db), "--quiet"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              encoding="utf-8", errors="replace")
     seen = set()
     while p.poll() is None:
         if not db.exists() or db.stat().st_size == 0:

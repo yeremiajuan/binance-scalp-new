@@ -26,10 +26,11 @@
 
 ## Engineering limitations
 
-- **Locking** uses `fcntl.flock` and has only been tested on Linux. macOS should work but is untested, and
-  Windows is refused. Network-filesystem detection is Linux-only. Canonicalization handles symlinks and
-  relative paths, and refuses hard links. Coordination across machines and the Phase 2 account-profile lock
-  are out of scope.
+- **Locking** (updated for native Windows): OS locks via `filelock` (`flock` on Linux, `LockFileEx` on Windows).
+  Exercised on Linux only; **Windows validation NOT RUN** (see `docs/WINDOWS.md`); macOS untested.
+  Network-filesystem detection: `/proc/self/mountinfo` on Linux, UNC/`DRIVE_REMOTE` on Windows, none on macOS.
+  Canonicalization handles symlinks, junctions, relative paths, `..`, 8.3 names and letter case, and refuses
+  hard links. Coordination across machines is out of scope.
 - **No gap repair.** A missing minute resets indicators and re-warms over 250 bars. Phase 1 has no backfill
   path.
 - **A missing candle is only detected when a later event arrives.** A completely silent input stream needs
@@ -84,8 +85,8 @@
   a month (millions of inputs) startup can take minutes.
 - **Disk.** Expect roughly 1-2 GB per week of SQLite state plus compressed raw recordings; this is an estimate
   that needs measuring. A crash can lose up to ~1 s of raw lines, but not committed inputs or decisions.
-- **Locks and Telegram.** Both locks are local (`flock`); there is no cross-machine coordination, and only Linux
-  was exercised. Telegram delivery was tested against fakes only (no dry run against the real Bot API).
+- **Locks and Telegram.** Both locks are local OS locks; there is no cross-machine coordination, and only Linux
+  was exercised (Windows: NOT RUN). Telegram delivery was tested against fakes only (no dry run against the real Bot API).
   Duplicates after ambiguous sends are possible by design.
 - **Recovery is conservative.** After every reconnect, entries wait for a REST continuity check and a quote
   received after the reconnection; with an open position they wait until it is flattened. A breakout bar that
@@ -98,6 +99,27 @@
   are unavailable and entries stay blocked.
 - **Not implemented, as instructed.** No historical-data intake or evaluation campaign, no Testnet, no
   credentials, no live trading, and no automatic trial launch.
+
+# Native Windows support: limitations
+
+- **Windows validation NOT RUN.** All Windows-specific code paths (`LockFileEx` through filelock, the named-pipe
+  listener with `PIPE_REJECT_REMOTE_CLIENTS`, `GetDriveTypeW`, junction/short-name/case aliases, Ctrl+Break and
+  `TerminateProcess` drills, Windows ACLs) were written and reviewed but never executed: the build environment is
+  Linux. The path classification logic is unit-tested on Linux with an injected drive-type function. Run
+  `scripts\verify_windows.py` on the user's PC before treating Windows as supported.
+- **Pipe access control relies on Windows defaults.** The named pipe uses the default DACL (creator, SYSTEM,
+  Administrators full; Everyone read) and the key file inherits `%LOCALAPPDATA%`'s ACL. Administrators and
+  SYSTEM can read the key. Another local account can open the pipe read-only and occupy one of the four handler
+  slots until it disconnects (it can never issue a control). The verification script records `icacls` output.
+- **Closing the console window is a crash, not a stop.** Windows gives console-close/logoff/shutdown events only
+  a few seconds and Python does not map them to signals; the runner relies on crash recovery there.
+- **Ctrl+C is verified by hand on Windows.** Scripts cannot send Ctrl+C to one child process; automated tests use
+  Ctrl+Break (SIGBREAK), and `docs/WINDOWS.md` gives a manual Ctrl+C check.
+- **Symlink aliases on Windows** need Developer Mode or elevation to create; tests then cover junctions, case,
+  `..` and short-name spellings instead, and skip the symlink spellings.
+- **Synced folders and antivirus.** OneDrive/Dropbox folders and real-time scanning can interfere with SQLite
+  files; the verification script reports whether the repository is under OneDrive. Not tested.
+- **macOS** remains untested.
 
 ## Defects
 

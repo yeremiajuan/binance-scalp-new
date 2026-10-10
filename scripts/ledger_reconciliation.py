@@ -24,6 +24,7 @@ import json
 import sqlite3
 import sys
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
+from pathlib import Path
 
 decimal.getcontext().prec = 50
 BPS = Decimal("0.0001")
@@ -34,7 +35,7 @@ def step_round(x: Decimal, inc: Decimal, mode) -> Decimal:
 
 
 def main(path: str) -> int:
-    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    conn = sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     meta = {r["key"]: r["value"] for r in conn.execute("SELECT * FROM meta")}
     cfg = json.loads(meta["config_canonical"])

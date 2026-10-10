@@ -51,11 +51,11 @@ def test_network_package_has_no_signer_key_order_or_account_path():
     forbidden = re.compile(r"hmac|hashlib\.sha256\(.*secret|X-MBX-APIKEY|signature|/api/v3/order|/api/v3/account|"
                            r"userDataStream|listenKey|/sapi/|testnet", re.I)
     for f in NET.glob("*.py"):
-        text = f.read_text()
+        text = f.read_text(encoding="utf-8")
         assert not forbidden.search(text), f"{f.name}: {forbidden.search(text).group(0)}"
     assert all(path.startswith("/api/v3/") for path, _ in rest.ENDPOINTS.values())
     assert set(rest.ENDPOINTS) == {"time", "exchangeInfo", "executionRules", "klines", "avgPrice", "referencePrice"}
-    rest_src = (NET / "rest.py").read_text()
+    rest_src = (NET / "rest.py").read_text(encoding="utf-8")
     assert 'method="GET"' in rest_src and "POST" not in rest_src and "PUT" not in rest_src
     assert "DELETE" not in rest_src
 
@@ -64,7 +64,7 @@ def test_core_package_still_has_no_network_imports():
     core = ROOT / "src" / "paperbot"
     pat = re.compile(r"^\s*(import|from)\s+(socket|ssl|http|urllib|requests|websockets?|asyncio)\b", re.M)
     for f in core.glob("*.py"):
-        assert not pat.search(f.read_text()), f
+        assert not pat.search(f.read_text(encoding="utf-8")), f
 
 
 def test_daily_summary_is_written_once_per_local_day(tmp_path):
@@ -114,7 +114,7 @@ def test_websockets_floor_matches_the_real_connector_arguments(tmp_path, monkeyp
     from paperbot.config import ConfigError
     from paperbot_net import ws
 
-    deps = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["dependencies"]
+    deps = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["dependencies"]
     (spec,) = [d for d in deps if d.startswith("websockets")]
     assert spec.startswith("websockets>=15.0,") and ws.MIN_WEBSOCKETS == (15, 0)
     named = inspect.getfullargspec(client.connect)

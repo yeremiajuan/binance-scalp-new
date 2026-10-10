@@ -10,6 +10,7 @@ strategy parameter, a cost assumption or a fill rule in a direction that makes r
    `plan/` is untouched. The separate stock-alert repository was not accessed or modified.
 2. **No runtime dependencies.** Locking uses stdlib `fcntl.flock`, not a third-party file-lock package, so it
    supports Linux and macOS (only Linux was exercised). Windows is refused with a clear error.
+   *Superseded by W1 (native Windows support): locking now uses `filelock`.*
 3. **Strategy constants are frozen in code** (`strategy.py`), not in configuration. Changing them would create
    a new strategy version (`B20-T5-v1` is checked in the configuration). Costs, execution and risk values are
    configurable hypotheses.
@@ -132,7 +133,8 @@ strategy parameter, a cost assumption or a fill rule in a direction that makes r
     Any disagreement halts before mutation.
 30. The lock file is `<realpath(state)>.lock`, held with `flock` for the process lifetime. A database with more
     than one hard link is refused, because hard links defeat path canonicalization. A network-filesystem check
-    reads `/proc/self/mountinfo` on Linux.
+    reads `/proc/self/mountinfo` on Linux. *(W1/W2: the primitive is now `flock` on Linux and `LockFileEx` on
+    Windows; Windows refuses UNC paths and network drives.)*
 
 # Phase 2 decisions (forward runner on public market data)
 
@@ -236,10 +238,11 @@ P18. **Provenance labels.** Raw observations (every WS frame, REST response and 
     Reports label MOCKED data, and nothing is ever labeled SYNTHETIC unless it is.
 P19. **Two locks.** The canonical state-path lock (Phase 1) and a per-account profile lock
     (`~/.local/state/paperbot/locks/account-<sha256(id)[:24]>.lock`), both `flock`, both held for the runner's
-    lifetime.
+    lifetime. *(W1: OS lock via `filelock`; the default directory is per user and per platform.)*
 P20. **Controls while active.** `kill`/`reset`/`stop` first try the Phase 1 direct path. If the state is locked,
     they connect to `<state>.ctl` (Unix socket, mode 0600, removed on stop) and the owner applies the audited
-    control between events, so effects apply at the next input (at most one heartbeat later).
+    control between events, so effects apply at the next input (at most one heartbeat later). *(Superseded by
+    W3: an authenticated socket/named pipe in the per-user control directory.)*
 P21. **Manifest.** Covers code revision (git commit plus a hash of the source files), schema version,
     configuration, data sources, reporting timezone, run sessions (start/stop, cursor range, reason) and the
     predeclared evaluation rules from the plan.
@@ -270,3 +273,48 @@ P25. **Frozen protective prices keep their metadata version.** A position record
 P26. **websockets >= 15.0.** The sync client accepts `ping_interval` from 15.0 (13.x/14.x pass it on to socket
     creation and raise `TypeError`). `paperbot run` checks the installed release's connector parameters before
     taking any lock; the evidence runs the real-connector tests at exactly 15.0.
+
+# Native Windows support
+
+The user runs Windows; the earlier Linux/macOS assumption is superseded. WSL is not required. Strategy, risk,
+fees, fill assumptions and accounting are unchanged (the configuration hashes are unchanged).
+
+W1. **OS locks through `filelock` (>= 4.1).** A small, maintained, pure-Python library (tox-dev/py-filelock,
+    MIT, no dependencies) supplies the primitive: `fcntl.flock(LOCK_EX|LOCK_NB)` on Linux and
+    `LockFileEx(EXCLUSIVE|FAIL_IMMEDIATELY)` on one byte on Windows. Both are kernel locks on an open handle,
+    released by the OS when the process ends for any reason. `paperbot.oslock` wraps it non-blocking and fail
+    closed: `fallback_to_soft=False` (no silent switch to an existence-only lock on filesystems without flock),
+    `preserve_lock_file=True`, and any lock class other than the two native ones is refused. A lock file's
+    existence or content never decides ownership. Rejected alternatives: hand-written `msvcrt.locking` (locks
+    from the current file position, easy to get wrong), `portalocker` (needs pywin32 on Windows), PID files.
+W2. **Paths.** The canonical state path is `realpath(abspath(path))`, which on Windows also resolves junctions,
+    symlinks, `..`, 8.3 short names and the on-disk letter case of existing components; lock files are created
+    on case-insensitive NTFS, so letter-case variants reach the same lock. Comparison keys (control endpoint
+    names) use `normcase`. Hard-linked databases are refused on both platforms (`st_nlink`). Windows refuses UNC
+    paths (`\\server\share`, `\\?\UNC\...`) and drives whose `GetDriveTypeW` is `DRIVE_REMOTE`; a mapped
+    drive resolves to its UNC target. Read-only SQLite connections use `Path.as_uri()` (`file:///C:/...`, with
+    `?`, `#`, `%` and spaces percent-encoded). `profile_lock_dir = "default"` resolves to
+    `%LOCALAPPDATA%\paperbot\locks` on Windows and `~/.local/state/paperbot/locks` elsewhere; path settings are
+    not part of the configuration identity.
+W3. **Control channel.** stdlib `multiprocessing.connection`: a Unix-domain socket in the per-user control
+    directory (0700; socket 0600) on Linux, and a named pipe `\\.\pipe\paperbot-<hash>-<random>` on Windows,
+    created with `PIPE_REJECT_REMOTE_CLIENTS` (a one-flag override of the stdlib listener) and the default pipe
+    DACL (creator, SYSTEM, Administrators). No TCP endpoint exists. Every connection must pass the library's
+    mutual keyed-digest challenge with a fresh 32-byte key per run, stored with the endpoint address in
+    `<control dir>/<hash>.json` (0600 on Linux; on Windows it inherits the user-only ACL of `%LOCALAPPDATA%`).
+    Requests are JSON bytes (never pickles); only `cmd`, `reason` and `latch` are taken, and the owner thread
+    executes them, so mutations still go through the single owner. Each connection is handled in its own
+    bounded thread (at most 4), so a client stuck in the handshake cannot block others. The endpoint file is
+    removed on graceful stop; after a crash it is stale but harmless (nothing listens, and the released lock
+    lets controls use the direct path).
+W4. **Shutdown.** Handlers for SIGINT (Ctrl+C), SIGTERM (Linux) and SIGBREAK (Ctrl+Break, Windows); `paperbot
+    stop` works everywhere through the control channel. Closing a console window or terminating the process is
+    treated as a crash (the OS releases the locks; restart reconciles and recovers).
+W5. **Text and line endings.** Every file read/write names UTF-8. Files that are hashed or compared byte for
+    byte (recordings, fixtures, configurations written by tests) are written with `newline="\n"`, and
+    `.gitattributes` keeps LF in Windows checkouts. CLI output redirected to a file or pipe is UTF-8 on every
+    platform.
+W6. **Verification.** `scripts/verify_windows.py` (Python only) runs the checks and saves outputs under
+    `evidence/windows/`. Subprocess tests (`tests/test_ownership.py`) run unchanged on Linux and Windows; platform
+    branches are limited to alias spellings and the stop signal.
+

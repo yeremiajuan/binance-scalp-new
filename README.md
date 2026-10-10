@@ -24,8 +24,9 @@ ruff check src tests scripts
 python -m build                                     # sdist + wheel
 ```
 
-Requirements: Linux (verified) or macOS (expected to work, unverified); Windows is refused (process locks use
-`fcntl.flock`). State must live on a local disk.
+Requirements: Linux (verified) or native Windows 10/11 (implemented; **Windows validation NOT RUN**: run
+`scripts\verify_windows.py` on the PC, see `docs/WINDOWS.md` for PowerShell setup and operation; WSL is not
+needed). macOS is untested. State must live on a local disk. Runtime dependencies: `websockets` and `filelock`.
 
 ## Phase 1: synthetic replay (unchanged)
 
@@ -57,7 +58,7 @@ not serve `executionRules`/`referencePrice`, so entries then stay blocked (an un
 
 ### Local facts you must provide (not verifiable from this repository)
 
-* The machine's OS (only Linux was exercised), that it stays awake for the whole session, and a running NTP
+* The machine's OS (Linux was exercised; Windows validation NOT RUN), that it stays awake for the whole session, and a running NTP
   client (entries stay blocked until a server-time check succeeds with `|server - local| <= 1 s`).
 * Outbound connectivity: HTTPS 443 to `api.binance.com` and WSS 443 to `data-stream.binance.vision`. The
   environment where this code was written could **not** reach Binance (DNS/egress blocked), so no live
@@ -82,7 +83,8 @@ paperbot replay-recording --config config/forward.toml --input state/session.jso
 ```
 
 `run` holds two OS locks for its lifetime: the canonical state path and the paper account id (profile lock).
-While it runs, `kill`/`reset`/`stop` go through its local control socket (`<state>.ctl`, mode 0600), so there
+While it runs, `kill`/`reset`/`stop` go through its authenticated local control channel (a Unix socket on Linux,
+a local-only named pipe on Windows; see `docs/WINDOWS.md`), so there
 is still a single writer. On restart it reconciles the database, cancels unfilled entries, retires unresolved IOC
 attempts without fills, treats pre-restart quotes as stale, re-warms/backfills indicators (backfilled bars never
 create entries), flattens recovered tradable inventory on fresh quotes, and only then re-arms entries. A stream
@@ -112,10 +114,10 @@ gzip-compressed, under `forward.recordings_dir`. Sessions built from fake server
 
 | Path | Contents |
 |---|---|
-| `src/paperbot/` | Network-free core: strategy, engine (single state owner), ledger, constraints, risk, storage, reconciliation, report, CLI, forward-session logic (`forward.py`), payload normalization (`normalize.py`), recorded sessions (`recorded.py`) |
-| `src/paperbot_net/` | Public-data adapters only: GET-only REST client, WebSocket client, threaded runner, local control socket, optional Telegram |
+| `src/paperbot/` | Network-free core: strategy, engine (single state owner), ledger, constraints, risk, storage, reconciliation, report, CLI, forward-session logic (`forward.py`), payload normalization (`normalize.py`), recorded sessions (`recorded.py`), OS locks (`oslock.py`), per-user dirs (`userdirs.py`) |
+| `src/paperbot_net/` | Public-data adapters only: GET-only REST client, WebSocket client, threaded runner, authenticated local control channel (`control.py`), optional Telegram |
 | `config/paper.toml`, `config/forward.toml` | Synthetic and forward configurations (hypotheses) |
 | `fixtures/` | Dated SYNTHETIC metadata and the synthetic demo input |
 | `tests/` | Phase 1 tests (137) plus Phase 2 mocked protocol/runner/recording/Telegram tests |
-| `docs/` | `DECISIONS.md`, `LIMITATIONS.md`, `ACCEPTANCE.md`, `SMOKE_RUN.md` |
-| `evidence/` | Phase 1 artifacts (preserved); `evidence/phase2/` Phase 2 artifacts |
+| `docs/` | `DECISIONS.md`, `LIMITATIONS.md`, `ACCEPTANCE.md`, `SMOKE_RUN.md`, `WINDOWS.md` |
+| `evidence/` | Phase 1 artifacts (preserved); `evidence/phase2/` Phase 2 artifacts; `evidence/windows/` (filled by `scripts\verify_windows.py` on Windows); `evidence/platform-linux/` (the same script run on Linux) |
