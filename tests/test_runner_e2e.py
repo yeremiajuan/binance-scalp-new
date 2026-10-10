@@ -8,17 +8,18 @@ recording, the manifest and a graceful stop.
 from __future__ import annotations
 
 import json
-import threading
 import time
 
 import pytest
 from conftest import rows, write_forward_config
-from fake_binance import FakeMarket, FakeRestTransport, FakeStream, ws_book
+from fake_binance import FakeMarket, FakeRestTransport, FakeStream, SilentStream
+from runner_helpers import RunnerThread, wait_for
 
 from paperbot.cli import main
 from paperbot.storage import StateLocked
 from paperbot.synthetic import staircase
 from paperbot.timeutil import FIVE_MINUTES_US
+from paperbot_net.control import send_control
 from paperbot_net.runner import run_forward
 
 
@@ -39,21 +40,12 @@ def test_threaded_runner_reconnects_routes_controls_holds_locks_and_stops_gracef
     tmp, cfg, market, stream = live
     state = tmp / "live.sqlite"
     transport = FakeRestTransport(market)
-    result: dict = {}
-
-    def runner():
-        result["code"] = run_forward(str(cfg), str(state), run_seconds=30, transport=transport,
-                                     ws_url=f"ws://127.0.0.1:{stream.port}/stream", install_signals=False,
-                                     log=lambda *_: None)
-
-    t = threading.Thread(target=runner)
-    t.start()
+    runner = RunnerThread(cfg, state, transport=transport, ws_url=f"ws://127.0.0.1:{stream.port}/stream")
     try:
-        deadline = time.monotonic() + 15
-        while time.monotonic() < deadline and stream.connections < 2:
-            time.sleep(0.1)
-        assert stream.connections >= 2, "client did not reconnect after the server closed the stream"
-        time.sleep(1.0)
+        wait_for(lambda: stream.connections >= 2, "the client to reconnect after the server closed the stream")
+        wait_for(lambda: _ping(state), "the owner to answer on its control channel")
+        wait_for(lambda: rows(state, "SELECT count(*) AS n FROM input_log WHERE event_type = 'candle'")[0]["n"]
+                 >= 290, "the warm-up to be committed")
         # both owner locks are held: a second runner (same path) and a second state (same account) both fail
         with pytest.raises(StateLocked):
             run_forward(str(cfg), str(state), run_seconds=1, transport=transport, install_signals=False,
@@ -66,11 +58,11 @@ def test_threaded_runner_reconnects_routes_controls_holds_locks_and_stops_gracef
         assert main(["kill", "--state", str(state), "--reason", "e2e kill while active"]) == 0
         assert main(["status", "--state", str(state)]) == 0  # read-only status works during the run
         assert main(["stop", "--state", str(state), "--reason", "e2e graceful stop"]) == 0
-        t.join(timeout=20)
-        assert not t.is_alive() and result["code"] == 0
+        assert runner.stop() == 0  # already stopping: waits for the owner to finish
     finally:
         stream.stop.set()
-        t.join(timeout=20)
+        if runner.running():
+            runner.stop()
 
     feed = [h["kind"] for h in rows(state, "SELECT kind FROM health_events ORDER BY id")]
     assert feed.count("feed_ws_connected") >= 2 and "feed_ws_disconnected" in feed
@@ -98,34 +90,59 @@ def test_threaded_runner_reconnects_routes_controls_holds_locks_and_stops_gracef
     assert "manual_kill" in st
 
 
-class SilentStream(FakeStream):
-    """Sends a few quotes, then keeps the connection open but silent."""
-
-    def _serve(self, ws):
-        self.connections += 1
-        for _ in range(3):
-            self.u += 1
-            ws.send(ws_book(self.u, self.mid))
-            time.sleep(0.1)
-        while not self.stop.is_set():
-            time.sleep(0.1)
+def _ping(state) -> bool:
+    try:
+        return bool(send_control(str(state), {"cmd": "ping"}, timeout=5).get("ok"))
+    except (OSError, EOFError, ValueError):
+        return False
 
 
-def test_silent_open_stream_is_detected_without_any_message(tmp_path):
+def _health(state) -> list[dict]:
+    return rows(state, "SELECT id, seq, kind, detail FROM health_events ORDER BY id") if state.exists() else []
+
+
+def silent_setup(tmp_path, quotes: int = 3):
     now = time.time_ns() // 1000
     start = (now // FIVE_MINUTES_US) * FIVE_MINUTES_US - 300 * 60_000_000
     market = FakeMarket(staircase(start, 13))
-    stream = SilentStream(market.last_close(now))
+    stream = SilentStream(market.last_close(now), quotes=quotes)
     cfg = write_forward_config(tmp_path, forward={"ws_silence_s": 2, "reconnect_initial_ms": 100,
                                                    "reconnect_max_ms": 200, "heartbeat_ms": 500})
+    return market, stream, cfg
+
+
+def stale_after_fresh(state) -> dict | None:
+    """The first quotes_stale detected by the clock (after quotes were fresh), not the session-start one."""
+    seen_fresh = False
+    for h in _health(state):
+        if h["kind"] == "quotes_fresh":
+            seen_fresh = True
+        elif h["kind"] == "quotes_stale" and seen_fresh:
+            return h
+    return None
+
+
+def test_silent_open_stream_is_detected_without_any_message(tmp_path):
+    """Readiness-based: each condition is awaited (bounded) instead of assumed to happen within a fixed window,
+    which failed on a 1-vCPU VPS where committing the warm-up alone took most of the old 6 s window."""
+    market, stream, cfg = silent_setup(tmp_path)
     state = tmp_path / "silent.sqlite"
+    runner = RunnerThread(cfg, state, transport=FakeRestTransport(market),
+                          ws_url=f"ws://127.0.0.1:{stream.port}/stream")
     try:
-        code = run_forward(str(cfg), str(state), run_seconds=6, transport=FakeRestTransport(market),
-                           ws_url=f"ws://127.0.0.1:{stream.port}/stream", install_signals=False, log=lambda *_: None)
+        wait_for(lambda: any(h["kind"] == "quotes_fresh" for h in _health(state)), "the first quotes")
+        stale = wait_for(lambda: stale_after_fresh(state), "quotes_stale detected by local heartbeats")
+        wait_for(lambda: [h for h in _health(state) if h["kind"] == "feed_ws_disconnected" and "silent" in
+                          h["detail"]], "the client to close the silent connection itself")
+        wait_for(lambda: stream.connections >= 2, "a reconnect")
+        wait_for(lambda: rows(state, "SELECT count(*) AS n FROM input_log WHERE event_type = 'heartbeat' AND "
+                                     "seq > ?", (stale["seq"],))[0]["n"] >= 4,
+                 "4 heartbeats after the stale detection (the clock advances with no message)")
     finally:
+        code = runner.stop()
         stream.close()
     assert code == 0
-    hs = rows(state, "SELECT kind, detail FROM health_events ORDER BY id")
+    hs = _health(state)
     kinds = [h["kind"] for h in hs]
     assert "quotes_stale" in kinds  # detected by local heartbeats, no message needed
     disc = [h for h in hs if h["kind"] == "feed_ws_disconnected"]
@@ -153,8 +170,13 @@ def test_missing_connectivity_is_reported_and_blocks_entries_not_concealed(tmp_p
     def no_route(url, timeout):
         raise ConnectionRefusedError("simulated: no route to market stream")
 
-    code = run_forward(str(cfg), str(state), run_seconds=4, transport=transport, ws_connect=no_route,
-                       install_signals=False, log=lambda *_: None)
+    runner = RunnerThread(cfg, state, transport=transport, ws_connect=no_route)
+    try:
+        wait_for(lambda: any(h["kind"] == "feed_backfill_failed" for h in _health(state)),
+                 "the warm-up to time out (no REST connectivity)")
+        wait_for(lambda: transport.calls >= 5, "repeated REST attempts")
+    finally:
+        code = runner.stop()
     assert code == 0 and transport.calls >= 5
     hs = rows(state, "SELECT kind, detail FROM health_events ORDER BY id")
     assert any(h["kind"] == "feed_ws_disconnected" and "no route" in h["detail"] for h in hs)

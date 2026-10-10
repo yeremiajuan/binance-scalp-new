@@ -125,6 +125,25 @@
   has been fixed at UTC+7 since 1964.
 - **macOS** remains untested.
 
+# Slow persistence: limitations
+
+- **Wall-time detection still depends on disk speed.** Each committed input costs one fsync. With chunking, a stale
+  feed is detected about one chunk (20 commits) plus queued inputs after it becomes stale: measured 0.04-0.52 s on
+  this machine with 20 ms added per commit, versus 4.7 s (or never within the old test window) before the fix.
+  On a slower disk the bound grows proportionally.
+- **Sustained input faster than commits can still back up the queue.** For example, while an order is pending
+  every bookTicker update is committed; above ~60 updates/s on a 16 ms disk the queue grows. Lag is recorded and
+  new entries are blocked (`owner_lag`), but exits keep executing at receipt stamps, so their simulated timing is
+  optimistic by the lag. Review `feed_owner_lag` events and `max_owner_lag_ms` after a session.
+- **Inputs still queued at a stop are discarded** (their count is recorded in `session_stop`); they are not in the
+  raw recording either. A backfill left unapplied at a stop is fetched again on restart.
+- **Controls during a slow backfill** are answered between chunks (sub-second on the VPS disk), well inside the
+  15 s control reply timeout; before, a 1000-bar backfill (~16 s) could exceed it.
+- **Test deadlines** are bounded at 120 s per condition; a host slower than that fails with a diagnostic instead of
+  passing by luck. The slow-persistence tests add 20 ms per commit on top of the host's own fsync.
+- **Observed while testing (unchanged fill model):** an exit IOC submitted just before a disconnect can fill on the
+  first quote after the reconnect if that quote falls within `quote_max_age` of the order's readiness.
+
 ## Defects
 
 The independent review of `48b60e2` found four defects. All are fixed, with regression tests that fail on
@@ -164,5 +183,12 @@ against the `87b130b` source and pass now (`evidence/phase2/review_regressions.t
 Tests changed by these fixes (behavior changed deliberately, not weakened): the startup and restart tests now also
 expect `clock_unsynced` until the first server-time answer; the reconnect-gap and failed-backfill tests connect
 without auto-answering the new continuity check, so they still exercise the gap backfill and the backfill timeout.
+
+The VPS review of `bd43c0a` found a failing test (`test_silent_open_stream_is_detected_without_any_message`, 2
+heartbeats versus 4; under cProfile `quotes_stale` absent). Cause: both a fragile fixed-window test and a runtime
+delay (the warm-up was committed in one blocking call, ~5 s at ~16 ms per commit). Fixed by readiness-based tests
+and chunked backfill application with owner-lag disclosure (decisions S1-S3); regression tests
+`tests/test_slow_persistence.py` (2), `test_forward.py::test_chunked_warmup_*`, `::test_owner_lag_*` (2) fail
+against `bd43c0a`; evidence in `evidence/slow-persistence/`.
 
 No other Phase 2 defect is known. That is the implementer's assessment; Phase 2 needs independent re-review.

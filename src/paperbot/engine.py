@@ -132,6 +132,7 @@ BLOCK_REST = "rest_unavailable"
 BLOCK_CLOCK = "clock_unsynced"
 BLOCK_RECOVERY = "restart_recovery"
 BLOCK_FEED_RECOVERY = "feed_recovery"  # after a disconnect: fresh observations + continuity before rearming
+BLOCK_LAG = "owner_lag"  # inputs wait too long in the owner's queue: decisions would be late in wall time
 RECOVERY_BLOCKS = (BLOCK_RECOVERY, BLOCK_FEED_RECOVERY)
 CLOCK_CHECK_STALE_FACTOR = 3  # a successful clock check older than 3 check intervals no longer counts
 
@@ -518,6 +519,8 @@ class Engine:
             st.health.recovery_signaled = True
         elif ev.kind == "session_stop":
             self._set_block(st, rec, BLOCK_FEED, True, reason="session_stop")
+        elif ev.kind == "owner_lag":
+            self._set_block(st, rec, BLOCK_LAG, bool(detail.get("lagging")), lag_ms=detail.get("lag_ms"))
 
     def _on_session_start(self, st: EngineState, rec: Recorder, ev: SessionStartEvent, triggers: list[str]) -> None:
         """Forward-runner start/restart policy: cancel unfilled entries, retire unresolved exit attempts without
@@ -536,6 +539,7 @@ class Engine:
         self._invalidate_quotes(st, rec, "session_start")
         self._set_block(st, rec, BLOCK_FEED, True, reason="session_start")
         self._set_block(st, rec, BLOCK_RECOVERY, True, reason="session_start")
+        self._set_block(st, rec, BLOCK_LAG, False, reason="session_start")  # a new process has a new queue
         if self.cfg.clock_max_offset_us is not None:
             # clock verification starts pending: only a successful server-time check within the limit clears it
             st.clock_checked_us = None

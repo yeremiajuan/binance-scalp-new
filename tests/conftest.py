@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sqlite3
 import sys
@@ -14,6 +15,26 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 FULL_METADATA = ROOT / "fixtures" / "exchange_info_btcusdt_synthetic.json"
+
+
+@pytest.fixture(autouse=True)
+def emulated_slow_disk(monkeypatch):
+    """PAPERBOT_TEST_COMMIT_DELAY_S=0.016 (for example) slows every SQLite commit in the test process, to reproduce
+    a slow VPS disk on a fast machine. Off by default."""
+    delay = float(os.environ.get("PAPERBOT_TEST_COMMIT_DELAY_S") or 0)
+    if delay > 0:
+        import time
+
+        from paperbot.storage import Storage
+
+        original = Storage.commit_event
+
+        def slow(self, *args, **kwargs):
+            time.sleep(delay)
+            return original(self, *args, **kwargs)
+
+        monkeypatch.setattr(Storage, "commit_event", slow)
+    yield
 
 
 @pytest.fixture(autouse=True)

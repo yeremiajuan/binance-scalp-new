@@ -304,5 +304,26 @@ class FakeStream:
         self.server.shutdown()
 
 
-__all__ = ["FakeMarket", "FakeRestTransport", "FakeStream", "Harness", "boot", "standard_bars", "breakout_bar",
-           "range_bars", "T0", "MINUTE_US", "MS"]
+class SilentStream(FakeStream):
+    """Sends ``quotes`` bookTicker quotes on the first connection (``later_quotes`` on later ones, default the same),
+    then keeps the connection open but silent. ``sent_wall`` holds the wall time (seconds) of every quote sent."""
+
+    def __init__(self, mid: Decimal, quotes: int = 3, later_quotes: int | None = None):
+        self.quotes = quotes
+        self.later_quotes = quotes if later_quotes is None else later_quotes
+        self.sent_wall: list[float] = []
+        super().__init__(mid, drop_first=False)
+
+    def _serve(self, ws):
+        self.connections += 1
+        for _ in range(self.quotes if self.connections == 1 else self.later_quotes):
+            self.u += 1
+            ws.send(ws_book(self.u, self.mid))
+            self.sent_wall.append(time.time())
+            time.sleep(0.1)
+        while not self.stop.is_set():
+            time.sleep(0.1)
+
+
+__all__ = ["FakeMarket", "FakeRestTransport", "FakeStream", "SilentStream", "Harness", "boot", "standard_bars",
+           "breakout_bar", "range_bars", "T0", "MINUTE_US", "MS"]

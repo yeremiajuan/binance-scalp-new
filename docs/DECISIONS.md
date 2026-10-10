@@ -324,3 +324,28 @@ W7. **Time-zone data (review finding on `5d71ae2`).** `tzdata` is a runtime depe
     fallback is the same package everywhere and is testable on Linux (`PYTHONTZPATH=""`). `Asia/Jakarta` and all
     economic settings are unchanged; configuration hashes are unchanged.
 
+# Slow persistence and owner scheduling (VPS review of `bd43c0a`)
+
+Durability is unchanged: one `BEGIN IMMEDIATE ... COMMIT` per input with `synchronous=FULL`, inputs committed in
+receipt order. The reported host (1 vCPU, ~16 ms per commit) exposed how the single owner spends that time.
+
+S1. **Backfill results are applied in chunks.** A warm-up or gap backfill result used to be committed in one call
+    (~300 commits, ~5 s on the VPS; up to 1000 commits for a long outage) while the owner processed nothing else:
+    queued quotes, stream status, controls and heartbeat ticks all waited, so stale-quote detection was late in
+    wall time by the whole backfill. The runner now applies `BACKFILL_CHUNK` (20) bars per turn. Queued inputs go
+    first; a chunk runs when the queue is empty or after 20 inputs, so neither side starves. Chunk bars are
+    stamped with the later of the REST response time and the engine clock, so every input stays in order and no
+    bar is stamped before its close. Live bars stay held and recovery is not signaled until the last chunk. Step
+    mode (`backfill_chunk=None`) still applies a result in one call. Receipt stamps of backfill bars change (they
+    are stamped when applied); prices, indicators and decisions do not (backfill bars never create entries).
+S2. **Owner lag is measured and blocks new entries.** For each processed input the runner measures how long it
+    waited in the queue. Above `quote_max_age` (2 s) a recorded `owner_lag` feed event raises the `owner_lag` entry
+    block (decisions are made at receipt stamps, so a simulated entry would otherwise be earlier than a real
+    process could act); it clears below half the limit, and a new session clears a block left by a previous
+    process. Exits are not blocked. `session_stop` records `max_owner_lag_ms`, the number of queued inputs
+    discarded at stop and whether a backfill was left unapplied.
+S3. **Tests wait for observable conditions.** Threaded runner tests no longer assume work fits a fixed wall-clock
+    window (`run_seconds=6` failed on the VPS because the warm-up alone used it). They poll read-only state and
+    the control channel with bounded deadlines (120 s) and stop the owner through the real control channel.
+    `PAPERBOT_TEST_COMMIT_DELAY_S` emulates a slow disk for any test run.
+

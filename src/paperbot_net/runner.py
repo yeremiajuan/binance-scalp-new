@@ -207,6 +207,10 @@ class RestWorker(threading.Thread):
                 self.request("referencePrice", {"symbol": "BTCUSDT"})
 
 
+BACKFILL_CHUNK = 20  # bars committed per chunk while applying a warm-up/backfill result
+INPUTS_PER_CHUNK = 20  # queued inputs go first; a chunk still runs after this many, so a busy stream cannot starve it
+
+
 def run_forward(config_path: str, state_path: str, *, run_seconds: float | None = None, transport=None,
                 ws_url: str | None = None, ws_connect=None, notifier_factory=None, install_signals: bool = True,
                 log=print) -> int:
@@ -236,7 +240,7 @@ def run_forward(config_path: str, state_path: str, *, run_seconds: float | None 
         store.start_session(session_id, "restart" if restart else "start", wall_iso(), engine.state.cursor,
                             code_revision())
         session = ForwardSession(engine, session_id=session_id, restart=restart, raw_sink=recorder,
-                                 rest_request=worker.request)
+                                 rest_request=worker.request, backfill_chunk=BACKFILL_CHUNK)
         feed = StreamFeed(ws_url or stream_url(fwd.ws_host), lambda k, d: inbox.put(k, d),
                           stop_event=stop_event, initial_backoff_s=fwd.reconnect_initial_ms / 1000,
                           max_backoff_s=fwd.reconnect_max_ms / 1000, silence_s=fwd.ws_silence_s,
@@ -266,12 +270,15 @@ def run_forward(config_path: str, state_path: str, *, run_seconds: float | None 
             log(f"PAPER | PUBLIC DATA | forward runner {session_id} ({'restart' if restart else 'start'}) owns "
                 f"{lock.canonical}; control endpoint {control.path}")
             tick_s = min(fwd.heartbeat_ms, fwd.quote_sample_ms) / 1000 / 2
+            since_chunk = 0
             while not stop_event.is_set() and not session.stopped:
                 if deadline is not None and time.monotonic() >= deadline:
                     stop_reason["why"] = f"run_seconds={run_seconds}"
                     break
-                item = inbox.get(timeout=tick_s)
+                # never sleep while a backfill result is still being applied
+                item = inbox.get(timeout=0 if session.pending_work() else tick_s)
                 if item is not None:
+                    lag = clock.now_us() - item.recv_us  # wall time this input waited for the owner
                     if item.kind == "control":
                         reply_q = item.data.pop("_reply")
                         reply_q.put(session.control({**item.data, "wall_utc": wall_iso()}, item.recv_us))
@@ -280,13 +287,20 @@ def run_forward(config_path: str, state_path: str, *, run_seconds: float | None 
                         store.outbox_update(d["msg_id"], d["status"], d["attempts"], wall_iso(), d.get("error"))
                     else:
                         session.handle(item)
+                    session.observe_lag(lag, max(item.recv_us, engine.state.clock_us or 0))
+                    since_chunk += 1
                 now = inbox.tick_time()
                 if now is not None:
+                    session.observe_lag(0, now)  # the queue is empty: nothing is waiting
                     session.tick(now)
                     if notifier is not None:
                         notifier.after_tick(session, now)
+                if session.pending_work() and (inbox.q.empty() or since_chunk >= INPUTS_PER_CHUNK):
+                    session.work()  # one bounded chunk, then back to queued inputs and ticks
+                    since_chunk = 0
             why = stop_reason["why"] or session.stop_reason or "stopped"
-            session.stop(inbox.now(), why)
+            discarded = inbox.q.qsize()  # observations queued after the stop decision are not processed
+            session.stop(inbox.now(), why, discarded_inputs=discarded)
         except Exception as exc:  # noqa: BLE001 - halt safely; the last commit stands
             code = 5
             why = f"halted: {type(exc).__name__}: {exc}"

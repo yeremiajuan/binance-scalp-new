@@ -17,6 +17,11 @@ Normalization rules (documented in docs/DECISIONS.md, Phase 2):
   bars and the engine resets its indicators.
 * Heartbeats (local clock only) are sent when no other input was processed for ``heartbeat_ms`` so staleness,
   missing candles and timeouts are detected even when no message arrives.
+* A warm-up or backfill result is applied in bounded chunks (``backfill_chunk`` bars per ``work()`` call) when the
+  runner asks for it: between chunks the owner processes queued observations, controls and heartbeat ticks, so a
+  slow disk (one fsync per committed input) cannot keep health detection blind for the whole backfill. Chunk bars
+  are stamped with the later of the REST response time and the engine clock, so inputs stay in order and a bar is
+  never stamped before its close. Live bars stay held, and recovery is not signaled, until the last chunk.
 * Rearming (after a start, restart or reconnect) needs: warm-up/backfill done with no held bars and no missing
   candle, the stream connected, a quote received after the (re)connection, and current metadata. After a reconnect
   candle continuity is revalidated from REST before rearming. The clock check starts pending at every session
@@ -60,7 +65,8 @@ class Item:
 
 
 class ForwardSession:
-    def __init__(self, engine: Engine, *, session_id: str, restart: bool, raw_sink=None, rest_request=None):
+    def __init__(self, engine: Engine, *, session_id: str, restart: bool, raw_sink=None, rest_request=None,
+                 backfill_chunk: int | None = None):
         if engine.cfg.forward is None:
             raise ValueError("forward sessions need a [forward] configuration section")
         self.engine = engine
@@ -76,7 +82,11 @@ class ForwardSession:
         self.last_ref: dict[str, tuple[object, int]] = {}
         self.warmup_done = False
         self.held: dict[int, dict] = {}
-        self.backfill: tuple[int, int] | None = None  # (from_start_us, requested_at_us)
+        self.backfill: tuple[int, int] | None = None  # (from_start_us, requested_at_us): awaiting a REST answer
+        self.applying: dict | None = None  # a received warm-up/backfill result still being applied
+        self.backfill_chunk = backfill_chunk  # None: apply a result in one call (step mode)
+        self.lagging = False
+        self.max_lag_us = 0
         self.ws_connected = False
         self.rest_down = False
         self.time_failures = 0
@@ -181,7 +191,7 @@ class ForwardSession:
             self.ws_connected = True
             self.feed("ws_connected", now, conn=data.get("conn"))
             expected = self._expected()
-            if self.warmup_done and self.backfill is None and expected is not None:
+            if self.warmup_done and self._idle() and expected is not None:
                 # bars may have closed while disconnected: revalidate continuity from REST before rearming
                 self.feed("continuity_check", now, from_bar=iso_us(expected))
                 self._request_backfill(expected, None, now)
@@ -229,13 +239,13 @@ class ForwardSession:
         if expected is not None and start < expected:
             self.stats["bar_old_or_duplicate"] += 1
             return
-        if self.warmup_done and self.backfill is None and not self.held and (expected is None or start == expected):
+        if self.warmup_done and self._idle() and not self.held and (expected is None or start == expected):
             self.submit(obj)
             return
         if len(self.held) >= MAX_HELD_BARS:
             self.held.pop(min(self.held))
         self.held[start] = {**obj, "ws_recv": obj["recv"]}
-        if self.warmup_done and self.backfill is None and expected is not None and start > expected:
+        if self.warmup_done and self._idle() and expected is not None and start > expected:
             self._request_backfill(expected, start, now)
         self._flush(now)
 
@@ -249,7 +259,7 @@ class ForwardSession:
         self.rest_request("klines", params)
 
     def _flush(self, now: int, force: bool = False) -> None:
-        if not self.warmup_done or (self.backfill is not None and not force):
+        if not self.warmup_done or (not self._idle() and not force):
             return
         while self.held:
             expected = self._expected()
@@ -263,27 +273,56 @@ class ForwardSession:
             obj = self.held.pop(start)
             self.submit({**obj, "recv": iso_us(now)})  # processed now: lateness is measured at processing time
 
+    def _idle(self) -> bool:
+        """No backfill outstanding: neither awaiting a REST answer nor still applying one."""
+        return self.backfill is None and self.applying is None
+
     def _backfill_result(self, candles: list[dict], now: int, purpose: str) -> None:
-        upper = min(self.held) if self.held else None
-        submitted = 0
-        for c in candles:
+        self.backfill = None
+        self.applying = {"candles": candles, "i": 0, "recv": now, "purpose": purpose, "submitted": 0}
+        if self.backfill_chunk is None:
+            self.work()
+
+    def pending_work(self) -> bool:
+        return self.applying is not None
+
+    def work(self) -> None:
+        """Apply the next chunk of a received warm-up/backfill result (all of it in step mode)."""
+        a = self.applying
+        if a is None:
+            return
+        budget = self.backfill_chunk if self.backfill_chunk is not None else len(a["candles"]) + 1
+        candles = a["candles"]
+        stamp = max(a["recv"], self.engine.state.clock_us or 0)  # ordered after everything already processed
+        done = False
+        while budget > 0:
+            if a["i"] >= len(candles):
+                done = True
+                break
+            c = candles[a["i"]]
             start = parse_ts(c["start"])
             expected = self._expected()
+            upper = min(self.held) if self.held else None
             if expected is not None and start < expected:
+                a["i"] += 1
                 continue
-            if upper is not None and start >= upper:
+            if (upper is not None and start >= upper) or (expected is not None and start > expected):
+                done = True  # a live bar takes over, or REST itself has a hole (the engine will see the gap)
                 break
-            if expected is not None and start > expected:
-                break  # REST itself has a hole: stop; the engine will see the gap
-            self.submit({**c, "recv": iso_us(now)})
-            submitted += 1
-        self.stats[f"{purpose}_bars"] += submitted
-        self.backfill = None
+            self.submit({**c, "recv": iso_us(stamp)})
+            a["i"] += 1
+            a["submitted"] += 1
+            budget -= 1
+        if not done and a["i"] < len(candles):
+            return
+        purpose = a["purpose"]
+        self.applying = None
+        self.stats[f"{purpose}_bars"] += a["submitted"]
         if purpose == "warmup":
             self.warmup_done = True
         # after warm-up a remaining hole is backfilled; after a gap backfill, held bars are released even if REST
         # itself had a hole (the engine then resets its indicators rather than forward-filling)
-        self._flush(now, force=purpose == "backfill")
+        self._flush(stamp, force=purpose == "backfill")
 
     # ------------------------------------------------------------------- REST
 
@@ -353,7 +392,7 @@ class ForwardSession:
         # quotes_fresh is cleared by every disconnect and session start, so a fresh quote here was received after
         # the latest (re)connection
         if (any(b in st.health.blocks for b in RECOVERY_BLOCKS) and not st.health.recovery_signaled
-                and self.warmup_done and self.backfill is None and not self.held
+                and self.warmup_done and self._idle() and not self.held
                 and not st.health.candle_missing and self.ws_connected and BLOCK_FEED not in st.health.blocks
                 and st.metadata_hash is not None and st.health.quotes_fresh and st.last_quote is not None
                 and now - st.last_quote.recv_us <= self.engine.cfg.quote_max_age_us):
@@ -384,5 +423,19 @@ class ForwardSession:
         except (ValueError, RuntimeError) as exc:
             return {"ok": False, "error": str(exc)}
 
-    def stop(self, now: int, reason: str) -> None:
-        self.feed("session_stop", now, reason=reason)
+    def observe_lag(self, lag_us: int, at_us: int) -> None:
+        """Owner lag: how long a processed input waited in the queue (wall time). Decisions are made at receipt
+        stamps, so a long wait would make simulated entries look earlier than a real process could act: above the
+        quote freshness limit new entries are blocked (``owner_lag``); the block clears below half of it."""
+        self.max_lag_us = max(self.max_lag_us, lag_us)
+        limit = self.engine.cfg.quote_max_age_us
+        if not self.lagging and lag_us > limit:
+            self.lagging = True
+            self.feed("owner_lag", at_us, lagging=True, lag_ms=lag_us // US_PER_MS, limit_ms=limit // US_PER_MS)
+        elif self.lagging and lag_us < limit // 2:
+            self.lagging = False
+            self.feed("owner_lag", at_us, lagging=False, lag_ms=lag_us // US_PER_MS, limit_ms=limit // US_PER_MS)
+
+    def stop(self, now: int, reason: str, discarded_inputs: int = 0) -> None:
+        self.feed("session_stop", now, reason=reason, discarded_queued_inputs=discarded_inputs,
+                  unapplied_backfill=self.applying is not None, max_owner_lag_ms=self.max_lag_us // US_PER_MS)

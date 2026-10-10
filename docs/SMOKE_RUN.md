@@ -68,6 +68,8 @@ For the Phase 2 acceptance criteria, review:
 - that no signed call or order endpoint appears in raw recordings (every URL is an allowlisted public GET);
 - that status reported paused and exposed states correctly;
 - quote ages and how often health exits fired;
+- owner lag: `feed_owner_lag` events and `max_owner_lag_ms` in each `feed_session_stop` (should stay well below
+  2000 ms; sustained lag means the disk cannot keep up with the input rate);
 - disk growth.
 
 Replaying a recording with identical economics does not authorize a trial, Testnet or live trading.

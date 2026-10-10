@@ -500,3 +500,81 @@ def test_metadata_tick_change_keeps_an_open_position_reconciled_and_restartable(
         assert report(h2.state)["reconciliation"]["ok"]
     finally:
         h2.close()
+
+
+# ------------------------------------------------ slow persistence: chunked backfill and owner lag (step mode)
+
+
+def test_chunked_warmup_interleaves_health_checks_and_ends_in_the_same_state(tmp_path):
+    from paperbot import codec
+
+    now = BARS[249].end_us + 10_000 * MS
+    def indicators(st):
+        """Strategy state without receipt stamps (chunked bars are stamped when they are applied)."""
+        def strip(x):
+            if isinstance(x, dict):
+                return {k: strip(v) for k, v in x.items() if k not in ("recv_us", "available_us")}
+            return [strip(v) for v in x] if isinstance(x, list) else x
+        return strip(codec.dump(st.strategy))
+
+    ref = Harness(tmp_path, write_forward_config(tmp_path, name="ref.toml"), FakeMarket(BARS), state_name="ref.sqlite")
+    boot(ref, now)
+    expected_strategy = indicators(ref.st)
+    ref.close()
+
+    h = Harness(tmp_path, write_forward_config(tmp_path), FakeMarket(BARS))
+    try:
+        h.session.backfill_chunk = 25
+        h.start(now)
+        h.answer_all(now + 100 * MS)
+        assert h.session.pending_work() and h.st.strategy.five_count < 50  # only the first chunk is applied
+        h.connect(now + 200 * MS)
+        h.quote(now + 300 * MS, BARS[249].close)
+        assert h.st.health.quotes_fresh  # a queued observation is processed between chunks
+        h.session.work()
+        h.tick(now + 3_000 * MS)  # no message for 2.7 s: stale while the warm-up is still being applied
+        assert not h.st.health.quotes_fresh and health(h.state, "quotes_stale")
+        assert "restart_recovery" in h.st.health.blocks  # no recovery signal while bars are still pending
+        while h.session.pending_work():
+            h.session.work()
+        assert indicators(h.st) == expected_strategy  # same bars and indicators as the one-call warm-up
+        assert rows(h.state, "SELECT count(*) AS n FROM input_log WHERE disposition = 'rejected'")[0]["n"] == 0
+        cands = rows(h.state, "SELECT skip_reason FROM candidates")
+        assert {c["skip_reason"] for c in cands} == {"backfill_no_retroactive_entry"}
+    finally:
+        h.close()
+
+
+def test_owner_lag_blocks_entries_until_the_queue_catches_up(h):
+    t = booted(h)
+    h.session.observe_lag(1_500 * MS, t)
+    assert "owner_lag" not in h.st.health.blocks  # below the 2 s quote freshness limit
+    h.session.observe_lag(2_500 * MS, t + 1)
+    assert "owner_lag" in h.st.health.blocks
+    bb = BARS[250]
+    h.run_quotes(t + 10 * MS, bb.end_us + 300 * MS, bb.close, tick=False)
+    h.bar(bb)
+    (c,) = rows(h.state, "SELECT * FROM candidates WHERE bar_start_us = ?", (bb.start_us,))
+    assert c["skip_reason"] == "entry_block:owner_lag" and rows(h.state, "SELECT * FROM orders") == []
+    h.session.observe_lag(1_200 * MS, bb.end_us + 600 * MS)
+    assert "owner_lag" in h.st.health.blocks  # hysteresis: clears only below half the limit
+    h.session.observe_lag(0, bb.end_us + 700 * MS)
+    assert "owner_lag" not in h.st.health.blocks
+    lag = [json.loads(x["detail"]) for x in health(h.state, "feed_owner_lag")]
+    assert [x["lagging"] for x in lag] == [True, False] and lag[0]["lag_ms"] == 2500
+
+
+def test_a_new_session_clears_an_owner_lag_block_left_by_the_previous_process(tmp_path):
+    cfg = write_forward_config(tmp_path)
+    m = FakeMarket(BARS)
+    h = Harness(tmp_path, cfg, m)
+    t = boot(h, BARS[249].end_us + 10_000 * MS)
+    h.session.observe_lag(5_000 * MS, t)
+    assert "owner_lag" in h.st.health.blocks
+    h.close()  # the process ends while lagging
+    h2 = Harness(tmp_path, cfg, m, session_id="s2")
+    try:
+        boot(h2, t + 60 * US_PER_S)
+        assert "owner_lag" not in h2.st.health.blocks and h2.st.health.blocks == []
+    finally:
+        h2.close()
