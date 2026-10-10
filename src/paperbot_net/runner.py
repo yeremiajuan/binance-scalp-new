@@ -211,6 +211,36 @@ BACKFILL_CHUNK = 20  # bars committed per chunk while applying a warm-up/backfil
 INPUTS_PER_CHUNK = 20  # queued inputs go first; a chunk still runs after this many, so a busy stream cannot starve it
 
 
+def owner_turn(session: ForwardSession, inbox: StampedQueue, clock, *, store, notifier, tick_s: float,
+               since_chunk: int) -> int:
+    """One iteration of the owner loop: at most one queued input, a tick when the queue is empty, and at most one
+    backfill chunk. Returns the number of inputs processed since the last chunk."""
+    # never sleep while a backfill result is still being applied
+    item = inbox.get(timeout=0 if session.pending_work() else tick_s)
+    if item is not None:
+        lag = clock.now_us() - item.recv_us  # wall time this input waited for the owner
+        if item.kind == "control":
+            reply_q = item.data.pop("_reply")
+            reply_q.put(session.control({**item.data, "wall_utc": wall_iso()}, item.recv_us))
+        elif item.kind == "outbox_result":
+            d = item.data
+            store.outbox_update(d["msg_id"], d["status"], d["attempts"], wall_iso(), d.get("error"))
+        else:
+            session.handle(item)
+        session.observe_lag(lag, max(item.recv_us, session.engine.state.clock_us or 0))
+        since_chunk += 1
+    now = inbox.tick_time()
+    if now is not None:
+        session.observe_lag(0, now)  # the queue is empty: nothing is waiting
+        session.tick(now)
+        if notifier is not None:
+            notifier.after_tick(session, now)
+    if session.pending_work() and (inbox.q.empty() or since_chunk >= INPUTS_PER_CHUNK):
+        session.work()  # one bounded chunk, then back to queued inputs and ticks
+        since_chunk = 0
+    return since_chunk
+
+
 def run_forward(config_path: str, state_path: str, *, run_seconds: float | None = None, transport=None,
                 ws_url: str | None = None, ws_connect=None, notifier_factory=None, install_signals: bool = True,
                 log=print) -> int:
@@ -275,29 +305,8 @@ def run_forward(config_path: str, state_path: str, *, run_seconds: float | None 
                 if deadline is not None and time.monotonic() >= deadline:
                     stop_reason["why"] = f"run_seconds={run_seconds}"
                     break
-                # never sleep while a backfill result is still being applied
-                item = inbox.get(timeout=0 if session.pending_work() else tick_s)
-                if item is not None:
-                    lag = clock.now_us() - item.recv_us  # wall time this input waited for the owner
-                    if item.kind == "control":
-                        reply_q = item.data.pop("_reply")
-                        reply_q.put(session.control({**item.data, "wall_utc": wall_iso()}, item.recv_us))
-                    elif item.kind == "outbox_result":
-                        d = item.data
-                        store.outbox_update(d["msg_id"], d["status"], d["attempts"], wall_iso(), d.get("error"))
-                    else:
-                        session.handle(item)
-                    session.observe_lag(lag, max(item.recv_us, engine.state.clock_us or 0))
-                    since_chunk += 1
-                now = inbox.tick_time()
-                if now is not None:
-                    session.observe_lag(0, now)  # the queue is empty: nothing is waiting
-                    session.tick(now)
-                    if notifier is not None:
-                        notifier.after_tick(session, now)
-                if session.pending_work() and (inbox.q.empty() or since_chunk >= INPUTS_PER_CHUNK):
-                    session.work()  # one bounded chunk, then back to queued inputs and ticks
-                    since_chunk = 0
+                since_chunk = owner_turn(session, inbox, clock, store=store, notifier=notifier, tick_s=tick_s,
+                                         since_chunk=since_chunk)
             why = stop_reason["why"] or session.stop_reason or "stopped"
             discarded = inbox.q.qsize()  # observations queued after the stop decision are not processed
             session.stop(inbox.now(), why, discarded_inputs=discarded)
