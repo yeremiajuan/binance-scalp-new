@@ -1,0 +1,13 @@
+platform Linux-6.18.44-fc-v114-x86_64-with-glibc2.39
+python 3.13.16
+cpus 4
+emulation: commit delay 0.016 s; pinned to one CPU with a competing CPU burner: True
+reviewed source bd43c0a
+$ git rev-parse HEAD
+1c82117ef7b98260e747145f53bace02da28ebbb
+[exit 0]
+
+$ git status --porcelain
+?? evidence/slow-persistence/
+[exit 0]
+

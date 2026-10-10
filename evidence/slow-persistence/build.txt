@@ -1,0 +1,235 @@
+$ /home/user/binance-scalp-new/.venv/bin/python -m build --outdir /tmp/pbslow-3f7z2qb6/dist
+running egg_info
+writing src/paperbot.egg-info/PKG-INFO
+writing dependency_links to src/paperbot.egg-info/dependency_links.txt
+writing entry points to src/paperbot.egg-info/entry_points.txt
+writing requirements to src/paperbot.egg-info/requires.txt
+writing top-level names to src/paperbot.egg-info/top_level.txt
+reading manifest file 'src/paperbot.egg-info/SOURCES.txt'
+writing manifest file 'src/paperbot.egg-info/SOURCES.txt'
+running sdist
+running egg_info
+writing src/paperbot.egg-info/PKG-INFO
+writing dependency_links to src/paperbot.egg-info/dependency_links.txt
+writing entry points to src/paperbot.egg-info/entry_points.txt
+writing requirements to src/paperbot.egg-info/requires.txt
+writing top-level names to src/paperbot.egg-info/top_level.txt
+reading manifest file 'src/paperbot.egg-info/SOURCES.txt'
+writing manifest file 'src/paperbot.egg-info/SOURCES.txt'
+running check
+creating paperbot-0.2.0
+creating paperbot-0.2.0/src/paperbot
+creating paperbot-0.2.0/src/paperbot.egg-info
+creating paperbot-0.2.0/src/paperbot_net
+creating paperbot-0.2.0/tests
+copying files to paperbot-0.2.0...
+copying README.md -> paperbot-0.2.0
+copying pyproject.toml -> paperbot-0.2.0
+copying src/paperbot/__init__.py -> paperbot-0.2.0/src/paperbot
+copying src/paperbot/__main__.py -> paperbot-0.2.0/src/paperbot
+copying src/paperbot/cli.py -> paperbot-0.2.0/src/paperbot
+copying src/paperbot/codec.py -> paperbot-0.2.0/src/paperbot
+copying src/paperbot/config.py -> paperbot-0.2.0/src/paperbot
+copying src/paperbot/constraints.py -> paperbot-0.2.0/src/paperbot
+copying src/paperbot/engine.py -> paperbot-0.2.0/src/paperbot
+copying src/paperbot/events.py -> paperbot-0.2.0/src/paperbot
+copying src/paperbot/execution.py -> paperbot-0.2.0/src/paperbot
+copying src/paperbot/forward.py -> paperbot-0.2.0/src/paperbot
+copying src/paperbot/ledger.py -> paperbot-0.2.0/src/paperbot
+copying src/paperbot/money.py -> paperbot-0.2.0/src/paperbot
+copying src/paperbot/normalize.py -> paperbot-0.2.0/src/paperbot
+copying src/paperbot/oslock.py -> paperbot-0.2.0/src/paperbot
+copying src/paperbot/reconcile.py -> paperbot-0.2.0/src/paperbot
+copying src/paperbot/recorded.py -> paperbot-0.2.0/src/paperbot
+copying src/paperbot/replay.py -> paperbot-0.2.0/src/paperbot
+copying src/paperbot/report.py -> paperbot-0.2.0/src/paperbot
+copying src/paperbot/risk.py -> paperbot-0.2.0/src/paperbot
+copying src/paperbot/storage.py -> paperbot-0.2.0/src/paperbot
+copying src/paperbot/strategy.py -> paperbot-0.2.0/src/paperbot
+copying src/paperbot/synthetic.py -> paperbot-0.2.0/src/paperbot
+copying src/paperbot/timeutil.py -> paperbot-0.2.0/src/paperbot
+copying src/paperbot/userdirs.py -> paperbot-0.2.0/src/paperbot
+copying src/paperbot.egg-info/PKG-INFO -> paperbot-0.2.0/src/paperbot.egg-info
+copying src/paperbot.egg-info/SOURCES.txt -> paperbot-0.2.0/src/paperbot.egg-info
+copying src/paperbot.egg-info/dependency_links.txt -> paperbot-0.2.0/src/paperbot.egg-info
+copying src/paperbot.egg-info/entry_points.txt -> paperbot-0.2.0/src/paperbot.egg-info
+copying src/paperbot.egg-info/requires.txt -> paperbot-0.2.0/src/paperbot.egg-info
+copying src/paperbot.egg-info/top_level.txt -> paperbot-0.2.0/src/paperbot.egg-info
+copying src/paperbot_net/__init__.py -> paperbot-0.2.0/src/paperbot_net
+copying src/paperbot_net/control.py -> paperbot-0.2.0/src/paperbot_net
+copying src/paperbot_net/hosts.py -> paperbot-0.2.0/src/paperbot_net
+copying src/paperbot_net/rest.py -> paperbot-0.2.0/src/paperbot_net
+copying src/paperbot_net/runner.py -> paperbot-0.2.0/src/paperbot_net
+copying src/paperbot_net/telegram.py -> paperbot-0.2.0/src/paperbot_net
+copying src/paperbot_net/ws.py -> paperbot-0.2.0/src/paperbot_net
+copying tests/test_cli.py -> paperbot-0.2.0/tests
+copying tests/test_constraints.py -> paperbot-0.2.0/tests
+copying tests/test_demo_fixture.py -> paperbot-0.2.0/tests
+copying tests/test_execution.py -> paperbot-0.2.0/tests
+copying tests/test_forward.py -> paperbot-0.2.0/tests
+copying tests/test_inputs.py -> paperbot-0.2.0/tests
+copying tests/test_ledger.py -> paperbot-0.2.0/tests
+copying tests/test_locking.py -> paperbot-0.2.0/tests
+copying tests/test_ownership.py -> paperbot-0.2.0/tests
+copying tests/test_persistence.py -> paperbot-0.2.0/tests
+copying tests/test_phase2_static.py -> paperbot-0.2.0/tests
+copying tests/test_platform.py -> paperbot-0.2.0/tests
+copying tests/test_public_protocol.py -> paperbot-0.2.0/tests
+copying tests/test_recorded.py -> paperbot-0.2.0/tests
+copying tests/test_risk.py -> paperbot-0.2.0/tests
+copying tests/test_runner_e2e.py -> paperbot-0.2.0/tests
+copying tests/test_slow_persistence.py -> paperbot-0.2.0/tests
+copying tests/test_strategy.py -> paperbot-0.2.0/tests
+copying tests/test_telegram.py -> paperbot-0.2.0/tests
+Writing paperbot-0.2.0/setup.cfg
+Creating tar archive
+removing 'paperbot-0.2.0' (and everything under it)
+running egg_info
+writing src/paperbot.egg-info/PKG-INFO
+writing dependency_links to src/paperbot.egg-info/dependency_links.txt
+writing entry points to src/paperbot.egg-info/entry_points.txt
+writing requirements to src/paperbot.egg-info/requires.txt
+writing top-level names to src/paperbot.egg-info/top_level.txt
+reading manifest file 'src/paperbot.egg-info/SOURCES.txt'
+writing manifest file 'src/paperbot.egg-info/SOURCES.txt'
+running bdist_wheel
+running build
+running build_py
+creating build/lib/paperbot_net
+copying src/paperbot_net/__init__.py -> build/lib/paperbot_net
+copying src/paperbot_net/hosts.py -> build/lib/paperbot_net
+copying src/paperbot_net/runner.py -> build/lib/paperbot_net
+copying src/paperbot_net/telegram.py -> build/lib/paperbot_net
+copying src/paperbot_net/rest.py -> build/lib/paperbot_net
+copying src/paperbot_net/control.py -> build/lib/paperbot_net
+copying src/paperbot_net/ws.py -> build/lib/paperbot_net
+creating build/lib/paperbot
+copying src/paperbot/cli.py -> build/lib/paperbot
+copying src/paperbot/replay.py -> build/lib/paperbot
+copying src/paperbot/codec.py -> build/lib/paperbot
+copying src/paperbot/storage.py -> build/lib/paperbot
+copying src/paperbot/report.py -> build/lib/paperbot
+copying src/paperbot/synthetic.py -> build/lib/paperbot
+copying src/paperbot/constraints.py -> build/lib/paperbot
+copying src/paperbot/normalize.py -> build/lib/paperbot
+copying src/paperbot/config.py -> build/lib/paperbot
+copying src/paperbot/ledger.py -> build/lib/paperbot
+copying src/paperbot/__init__.py -> build/lib/paperbot
+copying src/paperbot/reconcile.py -> build/lib/paperbot
+copying src/paperbot/execution.py -> build/lib/paperbot
+copying src/paperbot/money.py -> build/lib/paperbot
+copying src/paperbot/engine.py -> build/lib/paperbot
+copying src/paperbot/strategy.py -> build/lib/paperbot
+copying src/paperbot/recorded.py -> build/lib/paperbot
+copying src/paperbot/userdirs.py -> build/lib/paperbot
+copying src/paperbot/timeutil.py -> build/lib/paperbot
+copying src/paperbot/forward.py -> build/lib/paperbot
+copying src/paperbot/__main__.py -> build/lib/paperbot
+copying src/paperbot/events.py -> build/lib/paperbot
+copying src/paperbot/oslock.py -> build/lib/paperbot
+copying src/paperbot/risk.py -> build/lib/paperbot
+running egg_info
+writing src/paperbot.egg-info/PKG-INFO
+writing dependency_links to src/paperbot.egg-info/dependency_links.txt
+writing entry points to src/paperbot.egg-info/entry_points.txt
+writing requirements to src/paperbot.egg-info/requires.txt
+writing top-level names to src/paperbot.egg-info/top_level.txt
+reading manifest file 'src/paperbot.egg-info/SOURCES.txt'
+writing manifest file 'src/paperbot.egg-info/SOURCES.txt'
+installing to build/bdist.linux-x86_64/wheel
+running install
+running install_lib
+creating build/bdist.linux-x86_64/wheel
+creating build/bdist.linux-x86_64/wheel/paperbot_net
+copying build/lib/paperbot_net/__init__.py -> build/bdist.linux-x86_64/wheel/./paperbot_net
+copying build/lib/paperbot_net/hosts.py -> build/bdist.linux-x86_64/wheel/./paperbot_net
+copying build/lib/paperbot_net/runner.py -> build/bdist.linux-x86_64/wheel/./paperbot_net
+copying build/lib/paperbot_net/telegram.py -> build/bdist.linux-x86_64/wheel/./paperbot_net
+copying build/lib/paperbot_net/rest.py -> build/bdist.linux-x86_64/wheel/./paperbot_net
+copying build/lib/paperbot_net/control.py -> build/bdist.linux-x86_64/wheel/./paperbot_net
+copying build/lib/paperbot_net/ws.py -> build/bdist.linux-x86_64/wheel/./paperbot_net
+creating build/bdist.linux-x86_64/wheel/paperbot
+copying build/lib/paperbot/cli.py -> build/bdist.linux-x86_64/wheel/./paperbot
+copying build/lib/paperbot/replay.py -> build/bdist.linux-x86_64/wheel/./paperbot
+copying build/lib/paperbot/codec.py -> build/bdist.linux-x86_64/wheel/./paperbot
+copying build/lib/paperbot/storage.py -> build/bdist.linux-x86_64/wheel/./paperbot
+copying build/lib/paperbot/report.py -> build/bdist.linux-x86_64/wheel/./paperbot
+copying build/lib/paperbot/synthetic.py -> build/bdist.linux-x86_64/wheel/./paperbot
+copying build/lib/paperbot/constraints.py -> build/bdist.linux-x86_64/wheel/./paperbot
+copying build/lib/paperbot/normalize.py -> build/bdist.linux-x86_64/wheel/./paperbot
+copying build/lib/paperbot/config.py -> build/bdist.linux-x86_64/wheel/./paperbot
+copying build/lib/paperbot/ledger.py -> build/bdist.linux-x86_64/wheel/./paperbot
+copying build/lib/paperbot/__init__.py -> build/bdist.linux-x86_64/wheel/./paperbot
+copying build/lib/paperbot/reconcile.py -> build/bdist.linux-x86_64/wheel/./paperbot
+copying build/lib/paperbot/execution.py -> build/bdist.linux-x86_64/wheel/./paperbot
+copying build/lib/paperbot/money.py -> build/bdist.linux-x86_64/wheel/./paperbot
+copying build/lib/paperbot/engine.py -> build/bdist.linux-x86_64/wheel/./paperbot
+copying build/lib/paperbot/strategy.py -> build/bdist.linux-x86_64/wheel/./paperbot
+copying build/lib/paperbot/recorded.py -> build/bdist.linux-x86_64/wheel/./paperbot
+copying build/lib/paperbot/userdirs.py -> build/bdist.linux-x86_64/wheel/./paperbot
+copying build/lib/paperbot/timeutil.py -> build/bdist.linux-x86_64/wheel/./paperbot
+copying build/lib/paperbot/forward.py -> build/bdist.linux-x86_64/wheel/./paperbot
+copying build/lib/paperbot/__main__.py -> build/bdist.linux-x86_64/wheel/./paperbot
+copying build/lib/paperbot/events.py -> build/bdist.linux-x86_64/wheel/./paperbot
+copying build/lib/paperbot/oslock.py -> build/bdist.linux-x86_64/wheel/./paperbot
+copying build/lib/paperbot/risk.py -> build/bdist.linux-x86_64/wheel/./paperbot
+running install_egg_info
+Copying src/paperbot.egg-info to build/bdist.linux-x86_64/wheel/./paperbot-0.2.0-py3.13.egg-info
+running install_scripts
+creating build/bdist.linux-x86_64/wheel/paperbot-0.2.0.dist-info/WHEEL
+creating '/tmp/pbslow-3f7z2qb6/dist/.tmp-hsxk_u57/paperbot-0.2.0-py3-none-any.whl' and adding 'build/bdist.linux-x86_64/wheel' to it
+adding 'paperbot/__init__.py'
+adding 'paperbot/__main__.py'
+adding 'paperbot/cli.py'
+adding 'paperbot/codec.py'
+adding 'paperbot/config.py'
+adding 'paperbot/constraints.py'
+adding 'paperbot/engine.py'
+adding 'paperbot/events.py'
+adding 'paperbot/execution.py'
+adding 'paperbot/forward.py'
+adding 'paperbot/ledger.py'
+adding 'paperbot/money.py'
+adding 'paperbot/normalize.py'
+adding 'paperbot/oslock.py'
+adding 'paperbot/reconcile.py'
+adding 'paperbot/recorded.py'
+adding 'paperbot/replay.py'
+adding 'paperbot/report.py'
+adding 'paperbot/risk.py'
+adding 'paperbot/storage.py'
+adding 'paperbot/strategy.py'
+adding 'paperbot/synthetic.py'
+adding 'paperbot/timeutil.py'
+adding 'paperbot/userdirs.py'
+adding 'paperbot_net/__init__.py'
+adding 'paperbot_net/control.py'
+adding 'paperbot_net/hosts.py'
+adding 'paperbot_net/rest.py'
+adding 'paperbot_net/runner.py'
+adding 'paperbot_net/telegram.py'
+adding 'paperbot_net/ws.py'
+adding 'paperbot-0.2.0.dist-info/METADATA'
+adding 'paperbot-0.2.0.dist-info/WHEEL'
+adding 'paperbot-0.2.0.dist-info/entry_points.txt'
+adding 'paperbot-0.2.0.dist-info/top_level.txt'
+adding 'paperbot-0.2.0.dist-info/RECORD'
+removing build/bdist.linux-x86_64/wheel
+Successfully built paperbot-0.2.0.tar.gz and paperbot-0.2.0-py3-none-any.whl
+* Creating isolated environment: venv+pip...
+* Installing packages in isolated environment:
+  - setuptools>=68
+* Getting build dependencies for sdist...
+* Installed build dependency versions:
+  - setuptools==84.0.0
+* Building sdist...
+* Building wheel from sdist
+* Creating isolated environment: venv+pip...
+* Installing packages in isolated environment:
+  - setuptools>=68
+* Getting build dependencies for wheel...
+* Installed build dependency versions:
+  - setuptools==84.0.0
+* Building wheel...
+[exit 0]
+

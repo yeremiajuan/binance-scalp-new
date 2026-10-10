@@ -1,0 +1,4 @@
+$ /home/user/binance-scalp-new/.venv/bin/python -m ruff check src tests scripts
+All checks passed!
+[exit 0]
+

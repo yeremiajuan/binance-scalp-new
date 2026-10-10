@@ -1,0 +1,88 @@
+### 1. reviewed source + reviewed test under VPS emulation (expected: FAIL, as reported)
+$ taskset -c 0 /home/user/binance-scalp-new/.venv/bin/python -m pytest -q -p no:cacheprovider -p slow_disk_plugin /tmp/pbslow-3f7z2qb6/reviewed/tests/test_runner_e2e.py::test_silent_open_stream_is_detected_without_any_message
+  env EMULATED_COMMIT_DELAY_S=0.016
+  env PYTHONPATH=/tmp/pbslow-3f7z2qb6/reviewed/src:/tmp/pbslow-3f7z2qb6/plugin
+F                                                                        [100%]
+=================================== FAILURES ===================================
+___________ test_silent_open_stream_is_detected_without_any_message ____________
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-128/test_silent_open_stream_is_det0')
+
+    def test_silent_open_stream_is_detected_without_any_message(tmp_path):
+        now = time.time_ns() // 1000
+        start = (now // FIVE_MINUTES_US) * FIVE_MINUTES_US - 300 * 60_000_000
+        market = FakeMarket(staircase(start, 13))
+        stream = SilentStream(market.last_close(now))
+        cfg = write_forward_config(tmp_path, forward={"ws_silence_s": 2, "reconnect_initial_ms": 100,
+                                                       "reconnect_max_ms": 200, "heartbeat_ms": 500})
+        state = tmp_path / "silent.sqlite"
+        try:
+            code = run_forward(str(cfg), str(state), run_seconds=6, transport=FakeRestTransport(market),
+                               ws_url=f"ws://127.0.0.1:{stream.port}/stream", install_signals=False, log=lambda *_: None)
+        finally:
+            stream.close()
+        assert code == 0
+        hs = rows(state, "SELECT kind, detail FROM health_events ORDER BY id")
+        kinds = [h["kind"] for h in hs]
+>       assert "quotes_stale" in kinds  # detected by local heartbeats, no message needed
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: assert 'quotes_stale' in ['entry_block_set', 'entry_block_set', 'entry_block_set', 'session_start', 'feed_clock_offset', 'entry_block_cleared', ...]
+
+/tmp/pbslow-3f7z2qb6/reviewed/tests/test_runner_e2e.py:130: AssertionError
+=========================== short test summary info ============================
+FAILED ../../../tmp/pbslow-3f7z2qb6/reviewed/tests/test_runner_e2e.py::test_silent_open_stream_is_detected_without_any_message
+1 failed in 7.35s
+[exit 1]
+
+### 2. THIS source + the reviewed (fixed-window) test: isolates the fragile 6 s deadline from the runtime
+$ taskset -c 0 /home/user/binance-scalp-new/.venv/bin/python -m pytest -q -p no:cacheprovider -p slow_disk_plugin /tmp/pbslow-3f7z2qb6/reviewed/tests/test_runner_e2e.py::test_silent_open_stream_is_detected_without_any_message
+  env EMULATED_COMMIT_DELAY_S=0.016
+  env PYTHONPATH=/home/user/binance-scalp-new/src:/tmp/pbslow-3f7z2qb6/plugin
+.                                                                        [100%]
+1 passed in 6.74s
+[exit 0]
+
+### 2b. THIS source + the reviewed fixed-window test on a disk twice as slow (result recorded as is)
+$ taskset -c 0 /home/user/binance-scalp-new/.venv/bin/python -m pytest -q -p no:cacheprovider -p slow_disk_plugin /tmp/pbslow-3f7z2qb6/reviewed/tests/test_runner_e2e.py::test_silent_open_stream_is_detected_without_any_message
+  env EMULATED_COMMIT_DELAY_S=0.032
+  env PYTHONPATH=/home/user/binance-scalp-new/src:/tmp/pbslow-3f7z2qb6/plugin
+.                                                                        [100%]
+1 passed in 6.74s
+[exit 0]
+
+### 2c. THIS source + the rewritten readiness-based test on the same twice-as-slow disk (expected: PASS)
+$ taskset -c 0 /home/user/binance-scalp-new/.venv/bin/python -m pytest -q -p no:cacheprovider -p slow_disk_plugin tests/test_runner_e2e.py::test_silent_open_stream_is_detected_without_any_message
+  env EMULATED_COMMIT_DELAY_S=0.032
+  env PYTHONPATH=/home/user/binance-scalp-new/src:/tmp/pbslow-3f7z2qb6/plugin
+.                                                                        [100%]
+1 passed in 7.23s
+[exit 0]
+
+### 3a. wall-time stale detection, reviewed source (runtime delay: the warm-up blocks the owner)
+$ taskset -c 0 /home/user/binance-scalp-new/.venv/bin/python -c <inline measurement script: MEASURE in this file> /home/user/binance-scalp-new/tests 0.016
+  env PYTHONPATH=/tmp/pbslow-3f7z2qb6/reviewed/src
+{
+ "warmup_bars_committed_before_stale_detection": 299,
+ "warmup_bars_committed_in_total_before_stop": 299,
+ "first_quote_commit_after_warmup_start_s": 6.64,
+ "quote_received_after_warmup_start_s": -0.1,
+ "stale_due_after_warmup_start_s": 1.9,
+ "stale_detected_after_warmup_start_s": 6.66,
+ "wall_delay_after_quote_went_stale_s": 4.76
+}
+[exit 0]
+
+### 3b. wall-time stale detection, this source (chunked warm-up interleaved with queued input/heartbeats)
+$ taskset -c 0 /home/user/binance-scalp-new/.venv/bin/python -c <inline measurement script: MEASURE in this file> /home/user/binance-scalp-new/tests 0.016
+  env PYTHONPATH=/home/user/binance-scalp-new/src
+{
+ "warmup_bars_committed_before_stale_detection": 100,
+ "warmup_bars_committed_in_total_before_stop": 140,
+ "first_quote_commit_after_warmup_start_s": -0.02,
+ "quote_received_after_warmup_start_s": -0.14,
+ "stale_due_after_warmup_start_s": 1.86,
+ "stale_detected_after_warmup_start_s": 2.24,
+ "wall_delay_after_quote_went_stale_s": 0.38
+}
+[exit 0]
+

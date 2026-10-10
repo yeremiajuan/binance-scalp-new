@@ -1,0 +1,179 @@
+### this source under VPS emulation (expected: PASS)
+$ taskset -c 0 /home/user/binance-scalp-new/.venv/bin/python -m pytest -v -p no:cacheprovider tests/test_runner_e2e.py tests/test_slow_persistence.py tests/test_forward.py::test_chunked_warmup_interleaves_health_checks_and_ends_in_the_same_state tests/test_forward.py::test_owner_lag_blocks_entries_until_the_queue_catches_up tests/test_forward.py::test_a_new_session_clears_an_owner_lag_block_left_by_the_previous_process
+  env PAPERBOT_TEST_COMMIT_DELAY_S=0.016
+  env PYTHONPATH=/home/user/binance-scalp-new/src
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0 -- /home/user/binance-scalp-new/.venv/bin/python
+rootdir: /home/user/binance-scalp-new
+configfile: pyproject.toml
+collecting ... collected 8 items
+
+tests/test_runner_e2e.py::test_threaded_runner_reconnects_routes_controls_holds_locks_and_stops_gracefully PASSED [ 12%]
+tests/test_runner_e2e.py::test_silent_open_stream_is_detected_without_any_message PASSED [ 25%]
+tests/test_runner_e2e.py::test_missing_connectivity_is_reported_and_blocks_entries_not_concealed PASSED [ 37%]
+tests/test_slow_persistence.py::test_silent_feed_is_detected_promptly_while_a_slow_warmup_is_still_being_committed PASSED [ 50%]
+tests/test_slow_persistence.py::test_open_inventory_on_a_silent_feed_under_slow_persistence_is_held_disclosed_and_never_exited_on_stale_data PASSED [ 62%]
+tests/test_forward.py::test_chunked_warmup_interleaves_health_checks_and_ends_in_the_same_state PASSED [ 75%]
+tests/test_forward.py::test_owner_lag_blocks_entries_until_the_queue_catches_up PASSED [ 87%]
+tests/test_forward.py::test_a_new_session_clears_an_owner_lag_block_left_by_the_previous_process PASSED [100%]
+
+========================= 8 passed in 94.47s (0:01:34) =========================
+[exit 0]
+
+### reviewed source, same tests and emulation (expected: FAIL)
+$ taskset -c 0 /home/user/binance-scalp-new/.venv/bin/python -m pytest -q -rf -p no:cacheprovider tests/test_runner_e2e.py tests/test_slow_persistence.py tests/test_forward.py::test_chunked_warmup_interleaves_health_checks_and_ends_in_the_same_state tests/test_forward.py::test_owner_lag_blocks_entries_until_the_queue_catches_up tests/test_forward.py::test_a_new_session_clears_an_owner_lag_block_left_by_the_previous_process
+  env PAPERBOT_TEST_COMMIT_DELAY_S=0.016
+  env PYTHONPATH=/tmp/pbslow-3f7z2qb6/reviewed/src
+...FFFFF                                                                 [100%]
+=================================== FAILURES ===================================
+_ test_silent_feed_is_detected_promptly_while_a_slow_warmup_is_still_being_committed _
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-133/test_silent_feed_is_detected_p0')
+
+    def test_silent_feed_is_detected_promptly_while_a_slow_warmup_is_still_being_committed(tmp_path):
+        now = time.time_ns() // 1000
+        start = (now // FIVE_MINUTES_US) * FIVE_MINUTES_US - 300 * 60_000_000
+        market = FakeMarket(staircase(start, 13))
+        stream = SilentStream(market.last_close(now), quotes=3)
+        cfg = write_forward_config(tmp_path, forward={"ws_silence_s": 2, "reconnect_initial_ms": 100,
+                                                       "reconnect_max_ms": 200, "heartbeat_ms": 500})
+        state = tmp_path / "slow.sqlite"
+        with SlowCommits(SLOW_S) as timer:
+            runner = RunnerThread(cfg, state, transport=FakeRestTransport(market),
+                                  ws_url=f"ws://127.0.0.1:{stream.port}/stream")
+            try:
+                wait_for(lambda: timer.stale_flips, "a stale-quote transition")
+                wait_for(lambda: poll_count(state, "SELECT count(*) AS n FROM input_log WHERE event_type = 'candle'")
+                         >= 250, "the slow warm-up to be committed")
+                wait_for(lambda: stream.connections >= 2, "the silent connection to be replaced")
+            finally:
+                code = runner.stop()
+                stream.close()
+        assert code == 0
+        candles = [w for w, t in timer.commits if t == "candle"]
+        quotes = [w for w, t in timer.commits if t == "quote"]
+        assert len(candles) >= 250 and quotes
+        # queued input is not starved by the warm-up: quotes received during it were committed before it finished
+>       assert quotes[0] < candles[-1], (quotes[0] - candles[0], candles[-1] - candles[0])
+E       AssertionError: (12.727935791015625, 12.60263991355896)
+E       assert 1791663763.9386258 < 1791663763.81333
+
+tests/test_slow_persistence.py:66: AssertionError
+_ test_open_inventory_on_a_silent_feed_under_slow_persistence_is_held_disclosed_and_never_exited_on_stale_data _
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-133/test_open_inventory_on_a_silen0')
+
+    def test_open_inventory_on_a_silent_feed_under_slow_persistence_is_held_disclosed_and_never_exited_on_stale_data(
+            tmp_path):
+        """Restart with an open position into a long slow backfill; the stream sends one quote, then stays silent
+        (also after reconnecting).
+    
+        The quote is fresh, so the queued restart-flatten exit is submitted on it; with no later quote the attempt
+        expires without a fill. (A quote after a reconnect within quote_max_age of readiness could fill it under the
+        unchanged fill model; this scenario deliberately has none.)"""
+        cfg = write_forward_config(tmp_path, forward={"ws_silence_s": 2, "reconnect_initial_ms": 100,
+                                                       "reconnect_max_ms": 200, "heartbeat_ms": 500})
+        now = time.time_ns() // 1000
+        bars = staircase((now // FIVE_MINUTES_US) * FIVE_MINUTES_US - 750 * 60_000_000, 30)  # 750 bars up to now
+        market = FakeMarket(bars)
+        h = Harness(tmp_path, cfg, market)  # step mode at normal speed: open a position ~500 minutes ago
+        t = boot(h, bars[249].end_us + 10_000 * MS)
+        bb = bars[250]
+        t = h.run_quotes(t, bb.end_us + 300 * MS, bb.close)
+        h.bar(bb)
+        h.run_quotes(bb.end_us + 800 * MS, bb.end_us + 2000 * MS, bb.close + 2)
+        assert h.st.position is not None
+        btc = h.st.balances.btc_total
+        h.close()
+    
+        stream = SilentStream(market.last_close(time.time_ns() // 1000), quotes=1, later_quotes=0)
+        state = h.state
+        before = rows(state, "SELECT count(*) AS n FROM input_log WHERE event_type = 'candle'")[0]["n"]
+        with SlowCommits(SLOW_S) as timer:  # the restart must backfill ~500 bars at slow-disk speed
+            runner = RunnerThread(cfg, state, transport=FakeRestTransport(market),
+                                  ws_url=f"ws://127.0.0.1:{stream.port}/stream")
+            try:
+                wait_for(lambda: [f for f in timer.stale_flips if f[2]], "a stale transition with inventory open")
+                wait_for(lambda: [x for x in _health(state) if x["kind"] == "exit_waiting"
+                                  and "awaiting_fresh_quote" in x["detail"]], "the exit to wait for fresh data")
+                wait_for(lambda: poll_count(state, "SELECT count(*) AS n FROM orders WHERE purpose = 'exit' AND status != "
+                                             "'pending'") >= 1, "an exit attempt to end without a fill")
+                wait_for(lambda: poll_count(state, "SELECT count(*) AS n FROM input_log WHERE event_type = 'candle'")
+                         - before >= 450, "the restart backfill to be committed")
+            finally:
+                code = runner.stop()
+                stream.close()
+        assert code == 0
+        candles = [w for w, t in timer.commits if t == "candle"]
+        stale_open = [w for w, _, inv in timer.stale_flips if inv]
+        assert len(candles) >= 400 and candles[-1] - candles[0] > 8.0  # a long, slow restart backfill ...
+>       assert stale_open[0] < candles[-1]  # ... and the exposed inventory went stale while it was being committed
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       assert 1791663794.679945 < 1791663794.5025947
+
+tests/test_slow_persistence.py:124: AssertionError
+___ test_chunked_warmup_interleaves_health_checks_and_ends_in_the_same_state ___
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-133/test_chunked_warmup_interleave0')
+
+    def test_chunked_warmup_interleaves_health_checks_and_ends_in_the_same_state(tmp_path):
+        from paperbot import codec
+    
+        now = BARS[249].end_us + 10_000 * MS
+        def indicators(st):
+            """Strategy state without receipt stamps (chunked bars are stamped when they are applied)."""
+            def strip(x):
+                if isinstance(x, dict):
+                    return {k: strip(v) for k, v in x.items() if k not in ("recv_us", "available_us")}
+                return [strip(v) for v in x] if isinstance(x, list) else x
+            return strip(codec.dump(st.strategy))
+    
+        ref = Harness(tmp_path, write_forward_config(tmp_path, name="ref.toml"), FakeMarket(BARS), state_name="ref.sqlite")
+        boot(ref, now)
+        expected_strategy = indicators(ref.st)
+        ref.close()
+    
+        h = Harness(tmp_path, write_forward_config(tmp_path), FakeMarket(BARS))
+        try:
+            h.session.backfill_chunk = 25
+            h.start(now)
+            h.answer_all(now + 100 * MS)
+>           assert h.session.pending_work() and h.st.strategy.five_count < 50  # only the first chunk is applied
+                   ^^^^^^^^^^^^^^^^^^^^^^
+E           AttributeError: 'ForwardSession' object has no attribute 'pending_work'
+
+tests/test_forward.py:530: AttributeError
+___________ test_owner_lag_blocks_entries_until_the_queue_catches_up ___________
+
+h = <fake_binance.Harness object at 0x7fc3bcd2b6f0>
+
+    def test_owner_lag_blocks_entries_until_the_queue_catches_up(h):
+        t = booted(h)
+>       h.session.observe_lag(1_500 * MS, t)
+        ^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'ForwardSession' object has no attribute 'observe_lag'
+
+tests/test_forward.py:550: AttributeError
+__ test_a_new_session_clears_an_owner_lag_block_left_by_the_previous_process ___
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-133/test_a_new_session_clears_an_o0')
+
+    def test_a_new_session_clears_an_owner_lag_block_left_by_the_previous_process(tmp_path):
+        cfg = write_forward_config(tmp_path)
+        m = FakeMarket(BARS)
+        h = Harness(tmp_path, cfg, m)
+        t = boot(h, BARS[249].end_us + 10_000 * MS)
+>       h.session.observe_lag(5_000 * MS, t)
+        ^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'ForwardSession' object has no attribute 'observe_lag'
+
+tests/test_forward.py:572: AttributeError
+=========================== short test summary info ============================
+FAILED tests/test_slow_persistence.py::test_silent_feed_is_detected_promptly_while_a_slow_warmup_is_still_being_committed
+FAILED tests/test_slow_persistence.py::test_open_inventory_on_a_silent_feed_under_slow_persistence_is_held_disclosed_and_never_exited_on_stale_data
+FAILED tests/test_forward.py::test_chunked_warmup_interleaves_health_checks_and_ends_in_the_same_state
+FAILED tests/test_forward.py::test_owner_lag_blocks_entries_until_the_queue_catches_up
+FAILED tests/test_forward.py::test_a_new_session_clears_an_owner_lag_block_left_by_the_previous_process
+5 failed, 3 passed in 96.86s (0:01:36)
+[exit 1]
+
